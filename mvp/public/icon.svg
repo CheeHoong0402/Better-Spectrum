@@ -1,1 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#172d28"/><path d="M115 180h282v200H115z" fill="none" stroke="#e8f1cf" stroke-width="18" stroke-linejoin="round"/><path d="M115 240h282M185 150v60m142-60v60m-155 88 52 48 92-94" fill="none" stroke="#e8f1cf" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="warm" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffbd32"/><stop offset="1" stop-color="#ff693b"/></linearGradient>
+    <linearGradient id="cool" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#009ee4"/><stop offset="1" stop-color="#00bda6"/></linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#b56af4"/><stop offset="1" stop-color="#4930ec"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#fff"/>
+  <path fill="url(#warm)" d="M106 132 196 152Q250 164 250 210V286C224 248 106 260 106 204Z"/>
+  <path fill="url(#cool)" d="M406 132 316 152Q262 164 262 210V286C288 248 406 260 406 204Z"/>
+  <path fill="url(#purple)" d="M106 252 200 276Q250 288 250 328V380C220 344 106 356 106 296Z"/>
+  <path fill="url(#purple)" d="M406 252 312 276Q262 288 262 328V380C292 344 406 356 406 296Z"/>
+</svg>
