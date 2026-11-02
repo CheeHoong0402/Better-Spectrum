@@ -1,0 +1,7 @@
+// Cache only the public app shell. Private API data is never cached here.
+const CACHE='student-manager-v1';
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/','/style.css','/app.js','/icon.svg'])));self.skipWaiting();});
+self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))])));
+self.addEventListener('fetch',e=>{if(e.request.method!=='GET'||new URL(e.request.url).origin!==self.location.origin||new URL(e.request.url).pathname.startsWith('/api/'))return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request).then(r=>r||new Response('Connect to the internet to open your planner.',{status:503}))));});
+self.addEventListener('push',e=>{let p={title:'Student Manager',body:'Your planner has an update.',url:'/'};try{p={...p,...e.data.json()};}catch{}e.waitUntil(self.registration.showNotification(p.title,{body:p.body,tag:p.tag,icon:'/icon-192.png',badge:'/icon-192.png',data:{url:p.url}}));});
+self.addEventListener('notificationclick',e=>{e.notification.close();let url=new URL(e.notification.data?.url||'/',self.location.origin);if(url.origin!==self.location.origin)url=new URL('/',self.location.origin);e.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(async clients=>{const existing=clients.find(c=>c.url.startsWith(self.location.origin));if(existing){await existing.navigate(url.href);return existing.focus();}return self.clients.openWindow(url.href);}));});

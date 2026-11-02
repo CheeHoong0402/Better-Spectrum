@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+const base=process.env.PLANNER_URL;
+const password=process.env.PLANNER_PASSWORD;
+if(!base||!password)throw new Error('Set PLANNER_URL and PLANNER_PASSWORD for your own deployment.');
+const unauth=await fetch(base+'/api/state');assert.equal(unauth.status,401);
+const login=await fetch(base+'/api/login',{method:'POST',headers:{Origin:base,'Content-Type':'application/json'},body:JSON.stringify({password})});assert.equal(login.status,200);
+const cookie=login.headers.get('set-cookie').split(';')[0];
+const r=await fetch(base+'/api/state',{headers:{Cookie:cookie}});assert.equal(r.status,200);const s=await r.json();
+assert.equal(Object.hasOwn(s,'moodle_token'),false);
+console.log(JSON.stringify({privateAccess:true,courses:s.courses.length,classes:s.classes.length,pushConfigured:s.pushReady}));
