@@ -1,36 +1,50 @@
 # Better Spectrum
 
-A private student dashboard MVP for SPeCTRUM course updates, assignment tracking, timetable reminders, and iPhone web push.
+A private, single-student planner for iPhone and desktop. The app lives in `mvp/`: HTML/CSS/JavaScript, a Cloudflare Worker, and D1. No App Store or native build is required.
 
-## Features
+## Develop
 
-- Responsive dashboard designed for installation on an iPhone Home Screen.
-- Weekly timetable and dated class reminders.
-- Manual deadlines and task completion tracking.
-- Announcement and course-material change feed.
-- Scheduled web-push reminders when the computer is off.
-- Optional Moodle-compatible integration for courses, assignments, forums, and course materials.
-- Password-protected API, encrypted saved access tokens, and bounded push retries.
+Requires Node.js 22 or later and npm.
 
-## Local development
+```text
+cd mvp
+npm ci
+node scripts/local-setup.mjs
+npm run db:local
+npm run dev
+```
 
-Requires Node.js 22 or later.
+Use `local-preview-only` on localhost. Local development uses `wrangler.jsonc` and a local database, with no personal seed records. Plan a semester or connect your own supported Moodle token to add courses.
 
-1. Install dependencies with `npm install`.
-2. Run `node scripts/local-setup.mjs` to create local-only credentials.
-3. Initialize the local database with `npm run db:local`.
-4. Start the local app with `npm run dev` and open `http://localhost:8787`.
-5. Use the local-only password `local-preview-only`.
+```text
+npm run check
+npm test
+npm run test:http
+npm run build
+```
 
-## Deployment
+`test:http` starts its own disposable local Worker and database. It exercises login, private access, tasks, semester preview/apply, and repeated imports. It never targets production. `build` generates the service worker and public release manifest from the current Git revision.
 
-Create your own Cloudflare Worker and D1 database, then replace the placeholder D1 ID in `wrangler.jsonc`. Initialize the database with `wrangler d1 execute student-manager --remote --file=schema.sql`, deploy with `wrangler deploy`, set `PLANNER_URL` to your Worker address, then run `node scripts/production-secrets.mjs` to generate credentials for your own deployment. Never commit `.dev.vars`, `.private/`, `.wrangler/`, or real account credentials.
+## Production releases
 
-## Boundaries
+See [mvp/DEPLOYMENT.md](mvp/DEPLOYMENT.md). Pull requests run checks, unit tests, HTTP tests and a Worker dry run. A passing commit on `main` is deployed to the configured existing Worker, after a private database backup and additive migrations. Deployment verifies the live release identifier, all public asset hashes and private API protection. Branch pushes do not deploy production.
 
-- iPhone notifications require adding the site to the Home Screen, granting notification permission, and testing delivery on the actual device.
-- Moodle API access requires a supported service token. Never enter a university password into this app.
-- Attendance reminders are supported; the MVP does not automatically mark attendance.
-- Add class dates based on your own verified timetable. The repository contains no personal timetable records.
-- Review the Moodle sync limits in `src/moodle.js` before relying on it for every forum reply or submission status.
-- Provider acceptance does not guarantee that a phone displayed the notification. Free-plan limits and current provider behavior should be checked for your own deployment.
+Application code has one source: this repository. Local production configuration, credentials, database backups and personal records are not committed. The original workspace's `mvp` directory is a directory link to this app; its old copy is retained only as a private archive.
+
+## Semester timetable
+
+Timetable → Plan semester lets you enter the term dates, teaching weeks, excluded dates and weekly classes. Week numbers count calendar weeks from the chosen Week 1 Monday; leave break weeks out of the teaching-week list. Per-class weeks support alternating patterns.
+
+Preview before confirming. A repeated save updates the same semester. Existing matching dated classes are adopted and protected; individual edits and cancellations survive later updates. Removing a weekly row removes only its unedited generated occurrences. Use the date-specific class editor for a replacement class or room change. Export/import JSON preserves the schedule's identifiers; an import never writes records until preview and confirmation.
+
+Dates must be reviewed against MAYA or TimeEdit. The app does not infer the semester from a one-week timetable. Automatic timetable retrieval and native iPhone widgets are not implemented.
+
+## Current boundaries
+
+- One private student account, not a shared multi-user service.
+- SPeCTRUM collection requires a supported token and remains bounded by the limits in `src/moodle.js`.
+- iPhone notifications require installation from Safari and a real-device delivery test. Provider acceptance does not prove phone display.
+- Only public app assets are cached offline. Private offline data is not implemented yet.
+- Weekly classes must start and end on the same day. Semester expansion is limited to 1,000 dated occurrences, with up to 40 weekly rows.
+- Signing out ends the session; it does not delete your cloud records.
+- Paid services and upgrades are not enabled by this project.

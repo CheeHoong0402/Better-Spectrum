@@ -8,12 +8,27 @@ export async function call(token,fn,args={}){
  if(data.exception)throw new Error(['invalidtoken','accessexception','webservice_access_exception'].includes(data.errorcode)?'SPeCTRUM access expired or this function is not permitted. Reconnect or check mobile access.':`SPeCTRUM could not complete ${fn}.`);
  return data;
 }
+const coursePalette=['#4263b5','#a84b26','#416f3d','#147870','#6c4cbf','#b7446a','#a65c16'];
+export function presentCourses(rows,previous=[]){
+ return rows.map(c=>{
+  const saved=previous.find(p=>c.id!=null&&p.id!=null?String(p.id)===String(c.id):p.code===c.code);
+  const slot=[...String(c.id??c.code)].reduce((n,char)=>(n*31+char.charCodeAt(0))>>>0,0)%coursePalette.length;
+  return {...c,code:saved?.code||c.code||c.shortname,
+   color:saved?.color||(c.color&&c.color!=='#4263b5'?c.color:coursePalette[slot])};
+ });
+}
+export async function currentCourses(db){
+ const catalog=JSON.parse(await setting(db,'course_catalog')||'[]'),configured=await setting(db,'courses');
+ const courses=presentCourses(configured?JSON.parse(configured):catalog,catalog);
+ return [...courses,...presentCourses(catalog.filter(c=>!courses.some(p=>p.code===c.code)))];
+}
 export async function connect(env,token){
  if(typeof token!=='string'||token.length<10||token.length>500)throw new Error('Enter a valid Moodle mobile access token.');
  const info=await call(token,'core_webservice_get_site_info');
  const courses=await call(token,'core_enrol_get_users_courses',{userid:info.userid});
  await setting(env.DB,'moodle_token',await seal(token,env.AUTH_SECRET));
- await setting(env.DB,'courses',JSON.stringify(courses.map(c=>({id:c.id,code:c.shortname,name:c.fullname,color:'#4263b5'}))));
+ const previous=await currentCourses(env.DB);
+ await setting(env.DB,'courses',JSON.stringify(presentCourses(courses.map(c=>({id:c.id,code:c.shortname,name:c.fullname})),previous)));
  await setting(env.DB,'connection','Connected · waiting for first course check');
  return courses.length;
 }
@@ -21,7 +36,7 @@ const clean=s=>String(s||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().
 export async function syncCourse(env,index){
  const encrypted=await setting(env.DB,'moodle_token');if(!encrypted)return;
  const token=await unseal(encrypted,env.AUTH_SECRET);
- const courses=JSON.parse(await setting(env.DB,'courses')||'[]');if(!courses.length)return;
+ const courses=(await currentCourses(env.DB)).filter(c=>c.id!=null);if(!courses.length)return;
  const c=courses[index%courses.length];
  const sections=await call(token,'core_course_get_contents',{courseid:c.id});
  const base=await setting(env.DB,`baseline:${c.id}`);const events=[],writes=[];let forumChecks=0;

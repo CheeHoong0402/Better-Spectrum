@@ -1,0 +1,36 @@
+name: Roll back production
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Previous Cloudflare version ID from the deployment summary
+        required: true
+permissions:
+  contents: read
+jobs:
+  rollback:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: mvp
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+      WORKER_NAME: ${{ vars.WORKER_NAME }}
+      PLANNER_URL: ${{ vars.PLANNER_URL }}
+      ROLLBACK_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: node scripts/production-config.mjs
+      - name: Validate version ID
+        run: node -e 'if(!/^[a-f0-9-]{36}$/.test(process.env.ROLLBACK_VERSION))process.exit(1)'
+      - run: npx wrangler rollback "$ROLLBACK_VERSION" --config wrangler.production.jsonc --yes

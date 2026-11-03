@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 const origin=process.env.SMOKE_ORIGIN||'http://127.0.0.1:8787';let cookie='';
+if(!['localhost','127.0.0.1'].includes(new URL(origin).hostname))throw new Error('Smoke tests create records and must run against a disposable local server.');
 async function req(path,data){return fetch(origin+path,{method:data===undefined?'GET':'POST',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});}
 assert.equal((await req('/')).status,200);
 assert.equal((await req('/api/state')).status,401);
@@ -13,4 +14,12 @@ assert.equal((await req('/api/subscribe',{endpoint:'https://127.0.0.1/push'})).s
 assert.equal((await req('/api/task-delete',{id:task.id})).status,200);
 assert.equal((await req('/api/classes',{course:'COURSE-1',starts:'2030-01-01T12:00:00+08:00',ends:'2030-01-01T11:00:00+08:00'})).status,400);
 const csrf=await fetch(origin+'/api/tasks',{method:'POST',headers:{Origin:'https://other.example',Cookie:cookie},body:'{}'});assert.equal(csrf.status,403);
-console.log('HTTP smoke checks passed: login, privacy, privacy, task persistence/completion, input validation, and cross-origin protection.');
+const definition={id:'smoke-semester',revision:0,name:'Smoke example',start:'2030-01-07',end:'2030-01-20',week1:'2030-01-07',teachingWeeks:[1,2],excludedDates:[],series:[{id:'lecture',course:'EXAMPLE101',name:'Example course',kind:'Lecture',weekday:1,start:'09:00',end:'10:00',room:'Example room',occ:'1',weeks:[]}]};
+const preview=await req('/api/semester-preview',{definition});assert.equal(preview.status,200);const proposal=await preview.json();assert.equal(proposal.counts.added,2);
+assert.equal((await req('/api/semester-apply',{definition:proposal.definition,token:proposal.token})).status,200);
+const after=await(await req('/api/state')).json();assert.equal(after.classes.length,2);assert.equal(after.semesters.length,1);assert.equal(after.courses[0].code,'EXAMPLE101');
+const second=await(await req('/api/semester-preview',{definition:{...definition,revision:1}})).json();assert.equal(second.counts.added,0);
+assert.equal((await req('/api/semester-apply',{definition:second.definition,token:second.token})).status,200);
+assert.equal((await(await req('/api/state')).json()).classes.length,2);
+assert.equal((await req('/release.json')).status,200);assert.equal((await req('/semester.js')).status,200);
+console.log('HTTP smoke checks passed: login, privacy, task persistence/completion, input validation, and cross-origin protection.');
