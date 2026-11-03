@@ -3,6 +3,7 @@ import {session,sign,digest,validPush,validDate} from './security.js';
 import {setting,connect,syncCourse,currentCourses} from './moodle.js';
 import {previewSemester,applySemester,SemesterError} from './semester.js';
 import {allowedScope} from './course-scope.js';
+import {AttendanceError,attendanceState,connectAttendance,refreshAttendance,setAttendanceEnabled,confirmAttendance,attendanceTick} from './attendance.js';
 const json=(v,status=200,extra={})=>Response.json(v,{status,headers:{'Cache-Control':'no-store',...extra}});
 export function reminderKey(type,item,sub){return `${type}:${item.id}:${item.due||item.starts}:${item.reminder_minutes}:${sub}`;}
 export function reminderDue(item,now){const end=Date.parse(item.due||item.starts);return end>now&&end-item.reminder_minutes*60000<=now;}
@@ -32,6 +33,8 @@ async function deliver(env){
  }
 }
 export async function tick(env,now=Date.now()){
+ // Keep attendance and course collection on separate minutes within the free Worker query budget.
+ if(Math.floor(now/60000)%2===1)try{await attendanceTick(env,(id,payload)=>queue(env,id,payload),now);}catch{await setting(env.DB,'attendance_error','Attendance checks failed. Check SPeCTRUM manually.');}
  const tasks=(await env.DB.prepare("SELECT t.* FROM tasks t WHERE status NOT IN ('submitted','done') AND (source<>'SPeCTRUM' OR EXISTS (SELECT 1 FROM content_scopes s WHERE s.id='module:'||substr(t.id,8) AND s.allowed=1))").all()).results;
  const classes=(await env.DB.prepare('SELECT * FROM classes WHERE ends>?').bind(new Date(now).toISOString()).all()).results;
  for(const [kind,items] of [['task',tasks],['class',classes]])for(const item of items)if(reminderDue(item,now))await queue(env,`${kind}:${item.id}:${item.due||item.starts}:${item.reminder_minutes}`,{title:kind==='task'?`${item.course} · deadline approaching`:`${item.course} · class soon`,body:kind==='task'?item.title:`${item.kind} · ${item.room||'Room not specified'}. Remember attendance.`,url:kind==='task'?'/#tasks':'/#timetable',scope:kind==='task'&&item.source==='SPeCTRUM'?`module:${item.id.slice(7)}`:undefined});
@@ -63,10 +66,16 @@ async function api(request,env,url){
   const [tasks,classes,updates,subs]=await Promise.all(["SELECT t.* FROM tasks t WHERE source<>'SPeCTRUM' OR EXISTS (SELECT 1 FROM content_scopes s WHERE s.id='module:'||substr(t.id,8) AND s.allowed=1) ORDER BY due",'SELECT c.*,o.semester_id FROM classes c LEFT JOIN class_occurrences o ON o.class_id=c.id ORDER BY julianday(c.starts)','SELECT u.* FROM updates u LEFT JOIN update_scopes us ON us.update_id=u.id LEFT JOIN content_scopes s ON s.id=us.scope_id LEFT JOIN content_scopes p ON p.id=s.parent_id WHERE us.scope_id IS NULL OR (s.allowed=1 AND (s.parent_id IS NULL OR p.allowed=1)) ORDER BY changed DESC LIMIT 60','SELECT COUNT(*) AS n FROM subscriptions'].map(q=>env.DB.prepare(q).all()));
   const partial=(await env.DB.prepare("SELECT key,value FROM settings WHERE key LIKE 'partial:%'").all()).results;
   const semesters=(await env.DB.prepare('SELECT * FROM semesters ORDER BY id').all()).results.map(s=>({...JSON.parse(s.definition),revision:s.revision}));
-  return json({courses:await currentCourses(env.DB),tasks:tasks.results,classes:classes.results,updates:updates.results,semesters,release:env.APP_RELEASE||'development',subscriptions:subs.results[0].n,pushKey:env.VAPID_PUBLIC_KEY||null,pushReady:!!env.VAPID_PRIVATE_KEY,connection:await setting(env.DB,'connection')||'Not connected · imported records only',lastSync:await setting(env.DB,'last_sync'),lastTick:await setting(env.DB,'last_tick'),partial});
+  return json({courses:await currentCourses(env.DB),tasks:tasks.results,classes:classes.results,updates:updates.results,semesters,attendance:await attendanceState(env),release:env.APP_RELEASE||'development',subscriptions:subs.results[0].n,pushKey:env.VAPID_PUBLIC_KEY||null,pushReady:!!env.VAPID_PRIVATE_KEY,connection:await setting(env.DB,'connection')||'Not connected · imported records only',lastSync:await setting(env.DB,'last_sync'),lastTick:await setting(env.DB,'last_tick'),partial});
  }
  if(request.method!=='POST')return json({error:'Not found'},404);
  switch(url.pathname){
+ case '/api/attendance-connect':await connectAttendance(env,data);return json({ok:true});
+ case '/api/attendance-enabled':await setAttendanceEnabled(env,data.enabled);return json({ok:true});
+ case '/api/attendance-refresh':await refreshAttendance(env,data.courseId);return json({ok:true});
+ case '/api/attendance-confirm':await confirmAttendance(env,data);return json({ok:true});
+ case '/api/attendance-cancel':await env.DB.prepare('UPDATE attendance_sessions SET confirmed_class=NULL,message=? WHERE id=?').bind('Confirmation withdrawn',data.id).run();return json({ok:true});
+ case '/api/attendance-disconnect':await setAttendanceEnabled(env,false);await env.DB.prepare("DELETE FROM settings WHERE key IN ('attendance_cookie','attendance_connection')").run();return json({ok:true});
  case '/api/semester-preview':
  case '/api/semester-apply':{
   try{return json(url.pathname.endsWith('preview')?await previewSemester(env.DB,data.definition):await applySemester(env.DB,data.definition,data.token));}
@@ -96,16 +105,16 @@ async function api(request,env,url){
  case '/api/unsubscribe':await env.DB.prepare('DELETE FROM subscriptions WHERE id=?').bind(await digest(String(data.endpoint))).run();return json({ok:true});
  case '/api/push-test':if(!(await env.DB.prepare('SELECT id FROM subscriptions LIMIT 1').first()))return json({error:'Enable notifications on this device first.'},400);await queue(env,`test:${crypto.randomUUID()}`,{title:'Your planner is working',body:'This notification was sent by your cloud reminder service.',url:'/#settings'},new Date(Date.now()+(data.delayed?120000:0)).toISOString());if(!data.delayed)await deliver(env);return json({ok:true,message:data.delayed?'Test queued for two minutes from now. You can close the app and switch off your laptop.':'Push request processed. Check your device and delivery status.'});
  case '/api/deliveries':return json((await env.DB.prepare('SELECT id,sent,attempts,error,due FROM deliveries ORDER BY due DESC LIMIT 10').all()).results);
- case '/api/connect':return json({ok:true,courses:await connect(env,data.token)});
+ case '/api/connect':{const courses=await connect(env,data.token);await setAttendanceEnabled(env,false);await env.DB.prepare("DELETE FROM settings WHERE key IN ('attendance_cookie','attendance_connection')").run();return json({ok:true,courses});}
  case '/api/sync':{const events=await syncCourse(env,0);for(const e of events||[])await queue(env,e.id,{title:e.title,body:e.body.slice(0,160),url:'/#updates',scope:e.scope});return json({ok:true});}
- case '/api/disconnect':await env.DB.prepare("DELETE FROM settings WHERE key IN ('moodle_token','connection','courses')").run();return json({ok:true});
+ case '/api/disconnect':await setAttendanceEnabled(env,false);await env.DB.prepare("DELETE FROM settings WHERE key IN ('moodle_token','connection','courses','attendance_cookie','attendance_connection')").run();return json({ok:true});
  default:return json({error:'Not found'},404);
  }
 }
 export default {
  async fetch(request,env){
   const url=new URL(request.url);let response;
-  try{response=url.pathname.startsWith('/api/')?await api(request,env,url):await env.ASSETS.fetch(request);}catch(e){response=json({error:e.message.startsWith('SPeCTRUM')?e.message:'The request could not be completed. Please try again.'},500);}
+  try{response=url.pathname.startsWith('/api/')?await api(request,env,url):await env.ASSETS.fetch(request);}catch(e){response=json({error:e instanceof AttendanceError||e.message.startsWith('SPeCTRUM')?e.message:'The request could not be completed. Please try again.'},e instanceof AttendanceError?400:500);}
   const h=new Headers(response.headers);h.set('X-Content-Type-Options','nosniff');h.set('Referrer-Policy','no-referrer');h.set('X-Frame-Options','DENY');h.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
   return new Response(response.body,{status:response.status,headers:h});
  },
