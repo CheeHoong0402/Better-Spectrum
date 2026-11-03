@@ -11,3 +11,4 @@ CREATE INDEX IF NOT EXISTS occurrences_semester ON class_occurrences(semester_id
 CREATE TABLE IF NOT EXISTS content_scopes (id TEXT PRIMARY KEY, course TEXT NOT NULL, allowed INTEGER NOT NULL, parent_id TEXT);
 CREATE INDEX IF NOT EXISTS scopes_course ON content_scopes(course);
 CREATE TABLE IF NOT EXISTS update_scopes (update_id TEXT PRIMARY KEY, scope_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS attendance_sessions (id TEXT PRIMARY KEY, course TEXT NOT NULL, course_id INTEGER NOT NULL, cmid INTEGER NOT NULL, name TEXT NOT NULL, row_key TEXT NOT NULL, day TEXT NOT NULL, label TEXT NOT NULL, session_id INTEGER, recorded TEXT NOT NULL DEFAULT '', manual INTEGER NOT NULL DEFAULT 0, checked TEXT NOT NULL, confirmed_class TEXT, class_starts TEXT, class_ends TEXT, attempted TEXT, notified INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '');

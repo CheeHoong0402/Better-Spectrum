@@ -1,0 +1,29 @@
+export function attendancePanel(state,{esc,day,time,dateKey,external}){
+ const a=state.attendance||{sessions:[]};
+ return `<section class="attendance-settings"><h2>Attendance assistance</h2>
+ <label class="attendance-toggle"><span>Auto-mark attendance<small>${a.enabled?'On':'Off'} · confirm each class before marking</small></span><input id="attendance-enabled" type="checkbox" role="switch" ${a.enabled?'checked':''} ${!a.connected?'disabled':''} aria-describedby="attendance-rules"></label>
+ <p id="attendance-rules">After you confirm a session for a class you are attending, the server checks it about every two minutes and marks it when available. Turning this off clears pending confirmations. A request already sent may still finish.</p>
+ <p><strong>WIX1003 lectures and tutorials stay manual.</strong> Password, QR code and network-restricted sessions also need you to mark in SPeCTRUM. ${state.courses.find(c=>c.code==='WIX1003')?.id?external(`https://spectrum.um.edu.my/course/view.php?id=${state.courses.find(c=>c.code==='WIX1003').id}`,'Open WIX1003'):''}</p>
+ <p>After a recorded result is verified, we send a push notification. <a href="#settings/notifications">Enable phone notifications →</a></p>
+ <p role="status">Attendance connection: ${esc(a.connection||'Not connected')}</p>${a.error?`<p class="notice" role="status">${esc(a.error)}</p>`:''}
+ <details ${!a.connected?'open':''}><summary>${a.connected?'Reconnect attendance':'Connect attendance'}</summary><form id="attendance-login"><label>Siswa email or SPeCTRUM username<input name="username" autocomplete="username" required maxlength="200"></label><label>SPeCTRUM password<input name="password" type="password" autocomplete="off" required maxlength="500"></label><p class="subtle">Used by this private app to sign into spectrum.um.edu.my. Your password is not stored. The encrypted sign-in session is kept on the server; reconnect here if it expires. Use the same student account as course sync.</p><button class="primary">Connect attendance</button></form></details>
+ ${a.connected?'<button class="quiet" id="attendance-disconnect">Disconnect attendance</button>':''}
+ <form id="attendance-check" class="attendance-check"><label>Check sessions for<select name="courseId" required><option value="">Choose a course</option>${state.courses.filter(c=>c.id!=null&&c.code!=='WIX1003').map(c=>`<option value="${esc(c.id)}">${esc(c.code)}</option>`).join('')}</select></label><button ${!a.connected?'disabled':''}>Check sessions</button></form>
+ <p class="subtle">Shows today and tomorrow. When auto-marking is on, checks also run near your saved classes. Confirm attendance on the day of class.</p>
+ ${a.sessions.length?a.sessions.map(s=>{
+  const classes=state.classes.filter(c=>c.course===s.course&&dateKey(c.starts)===s.day&&Date.parse(c.ends)>Date.now());
+  const canConfirm=a.enabled&&s.day===dateKey(new Date())&&!s.recorded&&!s.manual&&!s.attempted&&s.course!=='WIX1003'&&classes.length;
+  return `<article class="task attendance-session"><div class="task-meta"><strong>${esc(s.course)}</strong><span>${s.recorded?esc(s.recorded):s.manual?'Manual marking':s.confirmed_class?'Confirmed by you':s.session_id?'Open':'Waiting to open'}</span></div><h3>${esc(s.name)}</h3><p>${esc(s.label)}</p>${s.message?`<p class="subtle">${esc(s.message)}</p>`:''}
+   ${canConfirm&&!s.confirmed_class?`<form data-attendance-confirm="${esc(s.id)}"><label>Class you are attending<select name="classId" required><option value="">Choose your class</option>${classes.map(c=>`<option value="${esc(c.id)}">${esc(c.kind)} · ${esc(day(c.starts))} ${time(c.starts)}–${time(c.ends)} · OCC ${esc(c.occ)}</option>`).join('')}</select></label><button class="primary">I’m attending — auto-mark this session</button></form>`:''}
+   <div class="task-actions">${external(`https://spectrum.um.edu.my/mod/attendance/view.php?id=${s.cmid}`,'Open attendance')}${s.confirmed_class&&!s.attempted?`<button data-attendance-cancel="${esc(s.id)}" class="quiet">Withdraw confirmation</button>`:''}</div></article>`;
+ }).join(''):'<p class="empty">Check a course to find its attendance sessions. Nothing is marked until you enable the switch and confirm a class.</p>'}
+ </section>`;
+}
+export function bindAttendance({api,load,action,toast}){
+ document.querySelector('#attendance-enabled')?.addEventListener('change',e=>action(async()=>{const enabled=e.target.checked;e.target.disabled=true;try{await api('attendance-enabled',{enabled});toast(enabled?'Auto-marking enabled. Confirm each class you attend.':'Auto-marking off. Pending confirmations cleared.');}finally{await load();}}));
+ document.querySelector('#attendance-login')?.addEventListener('submit',e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));e.target.elements.password.value='';action(async()=>{await api('attendance-connect',data);await load();toast('Attendance connected. You can now enable auto-marking.');});});
+ document.querySelector('#attendance-disconnect')?.addEventListener('click',()=>action(async()=>{await api('attendance-disconnect',{});await load();}));
+ document.querySelector('#attendance-check')?.addEventListener('submit',e=>{e.preventDefault();const courseId=new FormData(e.target).get('courseId');action(async()=>{await api('attendance-refresh',{courseId:Number(courseId)});await load();toast('Attendance sessions checked.');});});
+ document.querySelectorAll('[data-attendance-confirm]').forEach(f=>f.addEventListener('submit',e=>{e.preventDefault();const classId=new FormData(f).get('classId');action(async()=>{await api('attendance-confirm',{id:f.dataset.attendanceConfirm,classId});await load();toast('Confirmation saved. We’ll notify you after SPeCTRUM confirms the result.');});}));
+ document.querySelectorAll('[data-attendance-cancel]').forEach(b=>b.addEventListener('click',()=>action(async()=>{await api('attendance-cancel',{id:b.dataset.attendanceCancel});await load();})));
+}
