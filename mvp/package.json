@@ -5,11 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run check && npm test && node scripts/deploy.mjs",
     "test": "node --test",
-    "check": "node --check src/worker.js && node --check public/app.js",
-    "db:local": "wrangler d1 execute student-manager --local --file=schema.sql",
-    "icons": "node scripts/icons.mjs"
+    "check": "node scripts/check.mjs",
+    "db:local": "wrangler d1 execute DB --local --file=schema.sql",
+    "icons": "node scripts/icons.mjs",
+    "predev": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs",
+    "backup": "node scripts/backup.mjs wrangler.production.jsonc",
+    "test:http": "node scripts/http-smoke.mjs"
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "^2.0.0"

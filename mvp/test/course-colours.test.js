@@ -1,10 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {presentCourses} from '../src/moodle.js';
-import {courses} from '../src/seed.js';
 test('connected courses retain imported colours and canonical timetable codes',()=>{
- const result=presentCourses(courses.map(c=>({...c,code:c.code+'_REMOTE',color:'#4263b5'})));
+ const courses=[{id:900001,code:'TEST101',color:'#147870'},{id:900002,code:'TEST102',color:'#6c4cbf'}];
+ const result=presentCourses(courses.map(c=>({...c,code:c.code+'_REMOTE',color:'#4263b5'})),courses);
  assert.deepEqual(result.map(c=>[c.code,c.color]),courses.map(c=>[c.code,c.color]));
+});
+test('manual courses without remote IDs retain their own presentation',()=>{
+ const saved=[{code:'TEST101',color:'#147870'},{code:'TEST102',color:'#6c4cbf'}];
+ assert.deepEqual(presentCourses(saved,saved),saved);
 });
 test('reconnecting preserves saved presentation by course ID and gives new courses stable colours',()=>{
  const saved=[{id:900001,code:'TEST101',color:'#147870'}];

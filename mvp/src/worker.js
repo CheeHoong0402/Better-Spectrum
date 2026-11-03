@@ -1,7 +1,7 @@
 import {buildPushPayload} from '@block65/webcrypto-web-push';
-import {courses,seed} from './seed.js';
 import {session,sign,digest,validPush,validDate} from './security.js';
-import {setting,connect,syncCourse,presentCourses} from './moodle.js';
+import {setting,connect,syncCourse,currentCourses} from './moodle.js';
+import {previewSemester,applySemester,SemesterError} from './semester.js';
 const json=(v,status=200,extra={})=>Response.json(v,{status,headers:{'Cache-Control':'no-store',...extra}});
 export function reminderKey(type,item,sub){return `${type}:${item.id}:${item.due||item.starts}:${item.reminder_minutes}:${sub}`;}
 export function reminderDue(item,now){const end=Date.parse(item.due||item.starts);return end>now&&end-item.reminder_minutes*60000<=now;}
@@ -29,7 +29,6 @@ async function deliver(env){
  }
 }
 export async function tick(env,now=Date.now()){
- await seed(env.DB);
  const tasks=(await env.DB.prepare("SELECT * FROM tasks WHERE status NOT IN ('submitted','done')").all()).results;
  const classes=(await env.DB.prepare('SELECT * FROM classes WHERE ends>?').bind(new Date(now).toISOString()).all()).results;
  for(const [kind,items] of [['task',tasks],['class',classes]])for(const item of items)if(reminderDue(item,now))await queue(env,`${kind}:${item.id}:${item.due||item.starts}:${item.reminder_minutes}`,{title:kind==='task'?`${item.course} · deadline approaching`:`${item.course} · class soon`,body:kind==='task'?item.title:`${item.kind} · ${item.room||'Room not specified'}. Remember attendance.`,url:kind==='task'?'/#tasks':'/#timetable'});
@@ -43,6 +42,7 @@ export async function tick(env,now=Date.now()){
  await env.DB.prepare('DELETE FROM deliveries WHERE sent IS NOT NULL AND sent<?').bind(new Date(now-7*86400000).toISOString()).run();
 }
 async function api(request,env,url){
+ if(url.pathname==='/api/version'&&request.method==='GET')return json({release:env.APP_RELEASE||'development'});
  if(!env.APP_PASSWORD||!env.AUTH_SECRET)return json({error:'Private access is not configured yet. Set APP_PASSWORD and AUTH_SECRET on the server.'},503);
  if(request.method!=='GET'&&request.headers.get('Origin')!==url.origin)return json({error:'Request origin was not accepted.'},403);
  if(Number(request.headers.get('Content-Length')||0)>24000)return json({error:'Request too large'},413);
@@ -56,14 +56,19 @@ async function api(request,env,url){
   return json({ok:true},200,{'Set-Cookie':`sm_session=${exp}.${await sign(exp,env.AUTH_SECRET)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`});
  }
  if(!await session(request,env.AUTH_SECRET))return json({error:'Sign in to your private planner.'},401);
- await seed(env.DB);
  if(url.pathname==='/api/state'&&request.method==='GET'){
-  const [tasks,classes,updates,subs]=await Promise.all(['SELECT * FROM tasks ORDER BY due','SELECT * FROM classes ORDER BY starts','SELECT * FROM updates ORDER BY changed DESC LIMIT 60','SELECT COUNT(*) AS n FROM subscriptions'].map(q=>env.DB.prepare(q).all()));
-  const configured=await setting(env.DB,'courses');const partial=(await env.DB.prepare("SELECT key,value FROM settings WHERE key LIKE 'partial:%'").all()).results;
-  return json({courses:configured?presentCourses(JSON.parse(configured)):courses,tasks:tasks.results,classes:classes.results,updates:updates.results,subscriptions:subs.results[0].n,pushKey:env.VAPID_PUBLIC_KEY||null,pushReady:!!env.VAPID_PRIVATE_KEY,connection:await setting(env.DB,'connection')||'Not connected · imported records only',lastSync:await setting(env.DB,'last_sync'),lastTick:await setting(env.DB,'last_tick'),partial});
+  const [tasks,classes,updates,subs]=await Promise.all(['SELECT * FROM tasks ORDER BY due','SELECT c.*,o.semester_id FROM classes c LEFT JOIN class_occurrences o ON o.class_id=c.id ORDER BY julianday(c.starts)','SELECT * FROM updates ORDER BY changed DESC LIMIT 60','SELECT COUNT(*) AS n FROM subscriptions'].map(q=>env.DB.prepare(q).all()));
+  const partial=(await env.DB.prepare("SELECT key,value FROM settings WHERE key LIKE 'partial:%'").all()).results;
+  const semesters=(await env.DB.prepare('SELECT * FROM semesters ORDER BY id').all()).results.map(s=>({...JSON.parse(s.definition),revision:s.revision}));
+  return json({courses:await currentCourses(env.DB),tasks:tasks.results,classes:classes.results,updates:updates.results,semesters,release:env.APP_RELEASE||'development',subscriptions:subs.results[0].n,pushKey:env.VAPID_PUBLIC_KEY||null,pushReady:!!env.VAPID_PRIVATE_KEY,connection:await setting(env.DB,'connection')||'Not connected · imported records only',lastSync:await setting(env.DB,'last_sync'),lastTick:await setting(env.DB,'last_tick'),partial});
  }
  if(request.method!=='POST')return json({error:'Not found'},404);
  switch(url.pathname){
+ case '/api/semester-preview':
+ case '/api/semester-apply':{
+  try{return json(url.pathname.endsWith('preview')?await previewSemester(env.DB,data.definition):await applySemester(env.DB,data.definition,data.token));}
+  catch(e){if(e instanceof SemesterError)return json({error:e.message},/changed/.test(e.message)?409:400);if(e.message.includes('semesters.revision'))return json({error:'This semester changed. Preview it again before saving.'},409);throw e;}
+ }
  case '/api/logout':return json({ok:true},200,{'Set-Cookie':'sm_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0'});
  case '/api/tasks':{
   if(!data.title?.trim()||data.title.length>180||!validDate(data.due)||!data.course)return json({error:'Enter a course, title, and valid due date.'},400);
@@ -76,9 +81,13 @@ async function api(request,env,url){
  case '/api/task-delete':{const t=await env.DB.prepare('SELECT source FROM tasks WHERE id=?').bind(data.id).first();if(t?.source==='manual'){await env.DB.prepare('DELETE FROM tasks WHERE id=?').bind(data.id).run();await env.DB.prepare('DELETE FROM deliveries WHERE sent IS NULL AND id LIKE ?').bind(`task:${data.id}:%`).run();}return json({ok:true});}
  case '/api/classes':{
   if(!data.course||!validDate(data.starts)||!validDate(data.ends)||Date.parse(data.ends)<=Date.parse(data.starts))return json({error:'Choose a course and an end time after the start time.'},400);
-  const id=data.id||crypto.randomUUID();await env.DB.prepare('INSERT OR REPLACE INTO classes (id,course,kind,starts,ends,room,occ,source,reminder_minutes) VALUES (?,?,?,?,?,?,?,?,?)').bind(id,String(data.course).slice(0,50),String(data.kind||'Class').slice(0,30),new Date(data.starts).toISOString(),new Date(data.ends).toISOString(),String(data.room||'').slice(0,160),String(data.occ||'').slice(0,30),'manual',15).run();await env.DB.prepare('DELETE FROM deliveries WHERE sent IS NULL AND id LIKE ?').bind(`class:${id}:%`).run();return json({ok:true});
+  const id=data.id||crypto.randomUUID();await env.DB.batch([
+   env.DB.prepare('INSERT OR REPLACE INTO classes (id,course,kind,starts,ends,room,occ,source,reminder_minutes) VALUES (?,?,?,?,?,?,?,?,?)').bind(id,String(data.course).slice(0,50),String(data.kind||'Class').slice(0,30),new Date(data.starts).toISOString(),new Date(data.ends).toISOString(),String(data.room||'').slice(0,160),String(data.occ||'').slice(0,30),'manual',15),
+   env.DB.prepare('UPDATE class_occurrences SET overridden=1,cancelled=0 WHERE class_id=?').bind(id),
+   env.DB.prepare("DELETE FROM deliveries WHERE sent IS NULL AND substr(id,1,length(?)+7)='class:'||?||':'").bind(id,id)
+  ]);return json({ok:true});
  }
- case '/api/class-delete':await env.DB.prepare('DELETE FROM classes WHERE id=?').bind(data.id).run();await env.DB.prepare('DELETE FROM deliveries WHERE sent IS NULL AND id LIKE ?').bind(`class:${data.id}:%`).run();return json({ok:true});
+ case '/api/class-delete':await env.DB.batch([env.DB.prepare('UPDATE class_occurrences SET overridden=1,cancelled=1 WHERE class_id=?').bind(data.id),env.DB.prepare('DELETE FROM classes WHERE id=?').bind(data.id),env.DB.prepare("DELETE FROM deliveries WHERE sent IS NULL AND substr(id,1,length(?)+7)='class:'||?||':'").bind(data.id,data.id)]);return json({ok:true});
  case '/api/seen':await env.DB.prepare('UPDATE updates SET seen=1 WHERE id=?').bind(data.id).run();return json({ok:true});
  case '/api/subscribe':if(!validPush(data))return json({error:'Unsupported push subscription'},400);await env.DB.prepare('INSERT OR REPLACE INTO subscriptions VALUES (?,?)').bind(await digest(data.endpoint),JSON.stringify(data)).run();return json({ok:true});
  case '/api/unsubscribe':await env.DB.prepare('DELETE FROM subscriptions WHERE id=?').bind(await digest(String(data.endpoint))).run();return json({ok:true});
