@@ -39,32 +39,54 @@ export async function syncCourse(env,index){
  const courses=(await currentCourses(env.DB)).filter(c=>c.id!=null);if(!courses.length)return;
  const c=courses[index%courses.length];
  const sections=await call(token,'core_course_get_contents',{courseid:c.id});
- const base=await setting(env.DB,`baseline:${c.id}`);const events=[],writes=[];let forumChecks=0;
+ const base=await setting(env.DB,`baseline:${c.id}`),round=Number(await setting(env.DB,`sync_round:${c.id}`))||0;
+ const events=[],writes=[],warnings=new Set();
+ const modules=sections.flatMap(s=>s.modules||[]),forums=modules.filter(m=>m.modname==='forum').sort((a,b)=>a.id-b.id);
+ const forumIds=new Set(Array.from({length:Math.min(3,forums.length)},(_,i)=>forums[(round*3+i)%forums.length].id));
+ if(forums.length>3)warnings.add('Some forum discussions were not checked this pass; checks rotate between forums.');
  const snapshots=new Map((await env.DB.prepare('SELECT id,hash FROM snapshots').all()).results.map(s=>[s.id,s.hash]));
- async function watch(id,value,title,kind,url){
+ async function watch(id,value,title,kind,url,baseline=base){
   const hash=await digest(JSON.stringify(value));const old=snapshots.get(id);
-  if(base&&(!old||old!==hash))events.push({id:`${id}-${hash}`,course:c.code,title:old?`Updated: ${title}`:`New: ${title}`,body:kind==='announcement'?clean(value.message||value.description||value.name||value.title):'Open SPeCTRUM to view the latest version.',kind,url});
+  if(baseline&&(!old||old!==hash))events.push({id:`${id}-${hash}`,course:c.code,title:old?`Updated: ${title}`:`New: ${title}`,body:kind==='announcement'?clean(value.message||value.description||value.name||value.title):'Open SPeCTRUM to view the latest version.',kind,url});
   writes.push(env.DB.prepare('INSERT OR REPLACE INTO snapshots VALUES (?,?)').bind(id,hash));
  }
- for(const section of sections){
-  for(const m of section.modules||[]){
+ for(const m of modules){
    if(['assign','attendance','quiz'].includes(m.modname))continue;
    await watch(`module:${m.id}`,{name:m.name,description:m.description,files:(m.contents||[]).map(f=>({name:f.filename,modified:f.timemodified,size:f.filesize,url:f.fileurl}))},m.name,m.modname==='forum'||m.modname==='label'?'announcement':'material',m.url||`https://spectrum.um.edu.my/course/view.php?id=${c.id}`);
-   if(m.modname==='forum'&&forumChecks++<3){
-    try{const forum=await call(token,'mod_forum_get_forum_discussions',{forumid:m.instance,perpage:10});for(const post of forum.discussions||[])await watch(`post:${post.discussion}`,{title:post.name,message:post.message,modified:post.timemodified},post.name,'announcement',`https://spectrum.um.edu.my/mod/forum/discuss.php?d=${post.discussion}`);}catch{await setting(env.DB,`partial:${c.id}`,'Forum posts unavailable; course content is monitored.');}
+   if(m.modname==='forum'&&forumIds.has(m.id)){
+    try{
+     const forum=await call(token,'mod_forum_get_forum_discussions',{forumid:m.instance,perpage:10});
+     if(!Array.isArray(forum.discussions)||forum.warnings?.length)throw new Error('Incomplete forum response');
+     const forumBase=!!(base&&await setting(env.DB,`forum_baseline:${m.id}`));
+     for(const post of forum.discussions)await watch(`post:${post.discussion}`,{title:post.name,message:post.message,modified:post.timemodified},post.name,'announcement',`https://spectrum.um.edu.my/mod/forum/discuss.php?d=${post.discussion}`,forumBase);
+     writes.push(env.DB.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').bind(`forum_baseline:${m.id}`,'1'));
+    }catch{warnings.add('Forum posts unavailable; course content is monitored.');}
    }
-  }
  }
- const assignments=await call(token,'mod_assign_get_assignments',{'courseids[0]':c.id});let statusChecks=0;
- for(const course of assignments.courses||[])for(const a of course.assignments||[]){
-  if(!a.duedate)continue;
+ const response=await call(token,'mod_assign_get_assignments',{'courseids[0]':c.id});
+ if(!Array.isArray(response.courses))throw new Error('SPeCTRUM did not return assignment data.');
+ if(response.warnings?.length)warnings.add('Some assignments are unavailable from SPeCTRUM.');
+ const assignments=(response.courses||[]).flatMap(course=>course.assignments||[]).filter(a=>a.duedate).sort((a,b)=>a.id-b.id);
+ const statusIds=new Set(Array.from({length:Math.min(8,assignments.length)},(_,i)=>assignments[(round*8+i)%assignments.length].id));
+ if(assignments.length>8)warnings.add('Some submission statuses were not checked this pass; checks rotate and last known results are kept.');
+ for(const a of assignments){
   const id=`assign-${a.cmid}`, due=new Date(a.duedate*1000).toISOString(),url=`https://spectrum.um.edu.my/mod/assign/view.php?id=${a.cmid}`;
-  const old=await env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(id).first();let status='unknown';
-  try{if(statusChecks++>=8)throw new Error('status limit');const s=await call(token,'mod_assign_get_submission_status',{assignid:a.id});status=s.lastattempt?.submission?.status==='submitted'?'submitted':s.lastattempt?.submission?.status==='draft'?'draft':'pending';}catch{await setting(env.DB,`partial:${c.id}`,'Submission status unavailable for some assignments.');}
-  await env.DB.prepare('INSERT INTO tasks (id,course,title,due,status,source,url) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET course=excluded.course,title=excluded.title,due=excluded.due,status=excluded.status,url=excluded.url').bind(id,c.code,clean(a.name),due,status,'SPeCTRUM',url).run();
+  const old=await env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(id).first();let status=old?.status||'unknown';
+  if(statusIds.has(a.id))try{
+   const s=await call(token,'mod_assign_get_submission_status',{assignid:a.id});
+   const value=(a.teamsubmission?s.lastattempt?.teamsubmission:s.lastattempt?.submission)?.status;
+   if(!s.lastattempt||s.warnings?.length||(value&&!['submitted','draft','new','reopened'].includes(value)))throw new Error('Unverified submission response');
+   status=value==='submitted'?'submitted':value==='draft'?'draft':'pending';
+  }catch{warnings.add('Submission status unavailable for some assignments; last known results are kept.');}
+  const changes=[env.DB.prepare('INSERT INTO tasks (id,course,title,due,status,source,url) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET course=excluded.course,title=excluded.title,due=excluded.due,status=excluded.status,url=excluded.url').bind(id,c.code,clean(a.name),due,status,'SPeCTRUM',url)];
+  if(status==='submitted'||(old&&Date.parse(old.due)!==Date.parse(due)))changes.push(env.DB.prepare("DELETE FROM deliveries WHERE sent IS NULL AND substr(id,1,length(?)+6)='task:'||?||':'").bind(id,id));
+  await env.DB.batch(changes);
   if(base&&(!old||Date.parse(old.due)!==Date.parse(due)))events.push({id:`deadline:${id}:${due}`,course:c.code,title:old?'Assignment deadline changed':`New assignment: ${clean(a.name)}`,body:`Due ${new Date(due).toLocaleString('en-GB',{timeZone:'Asia/Kuala_Lumpur'})} MYT`,kind:'deadline',url});
  }
  for(let i=0;i<writes.length;i+=80)await env.DB.batch(writes.slice(i,i+80));
  for(const e of events){await env.DB.prepare('INSERT OR IGNORE INTO updates (id,course,title,body,url,kind,changed) VALUES (?,?,?,?,?,?,?)').bind(e.id,e.course,e.title,e.body,e.url,e.kind,new Date().toISOString()).run();}
+ if(warnings.size)await setting(env.DB,`partial:${c.id}`,`${c.code}: ${[...warnings].join(' ')}`);
+ else await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(`partial:${c.id}`).run();
+ await setting(env.DB,`sync_round:${c.id}`,round+1);
  await setting(env.DB,`baseline:${c.id}`,'1');await setting(env.DB,`synced:${c.id}`,new Date().toISOString());await setting(env.DB,'last_sync',new Date().toISOString());await setting(env.DB,'connection','Connected');return events;
 }

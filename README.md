@@ -48,3 +48,9 @@ Dates must be reviewed against MAYA or TimeEdit. The app does not infer the seme
 - Weekly classes must start and end on the same day. Semester expansion is limited to 1,000 dated occurrences, with up to 40 weekly rows.
 - Signing out ends the session; it does not delete your cloud records.
 - Paid services and upgrades are not enabled by this project.
+
+## SPeCTRUM checks
+
+The cloud scheduler checks one course every two minutes. Seven courses take about fourteen minutes per rotation. Each course pass checks all visible activity metadata and assignment deadlines, up to three forums (the latest ten discussions each), and up to eight assignment submission states. Larger courses rotate those bounded checks on subsequent passes so later items are not permanently skipped. A forum's first successful discussion check establishes its baseline without sending old-post alerts.
+
+Settings → SPeCTRUM connection identifies each course with incomplete checks. Warnings are rebuilt after each successful pass and clear when that course recovers. Failed or deferred submission checks retain the last known result; a new assignment remains unverified until checked. Confirmed submissions and changed deadlines remove obsolete unsent reminders. Saved results may be stale during an outage; check the original SPeCTRUM assignment when a warning is present.
