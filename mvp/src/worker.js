@@ -1,7 +1,7 @@
 import {buildPushPayload} from '@block65/webcrypto-web-push';
 import {courses,seed} from './seed.js';
 import {session,sign,digest,validPush,validDate} from './security.js';
-import {setting,connect,syncCourse} from './moodle.js';
+import {setting,connect,syncCourse,presentCourses} from './moodle.js';
 const json=(v,status=200,extra={})=>Response.json(v,{status,headers:{'Cache-Control':'no-store',...extra}});
 export function reminderKey(type,item,sub){return `${type}:${item.id}:${item.due||item.starts}:${item.reminder_minutes}:${sub}`;}
 export function reminderDue(item,now){const end=Date.parse(item.due||item.starts);return end>now&&end-item.reminder_minutes*60000<=now;}
@@ -60,7 +60,7 @@ async function api(request,env,url){
  if(url.pathname==='/api/state'&&request.method==='GET'){
   const [tasks,classes,updates,subs]=await Promise.all(['SELECT * FROM tasks ORDER BY due','SELECT * FROM classes ORDER BY starts','SELECT * FROM updates ORDER BY changed DESC LIMIT 60','SELECT COUNT(*) AS n FROM subscriptions'].map(q=>env.DB.prepare(q).all()));
   const configured=await setting(env.DB,'courses');const partial=(await env.DB.prepare("SELECT key,value FROM settings WHERE key LIKE 'partial:%'").all()).results;
-  return json({courses:configured?JSON.parse(configured):courses,tasks:tasks.results,classes:classes.results,updates:updates.results,subscriptions:subs.results[0].n,pushKey:env.VAPID_PUBLIC_KEY||null,pushReady:!!env.VAPID_PRIVATE_KEY,connection:await setting(env.DB,'connection')||'Not connected · imported records only',lastSync:await setting(env.DB,'last_sync'),lastTick:await setting(env.DB,'last_tick'),partial});
+  return json({courses:configured?presentCourses(JSON.parse(configured)):courses,tasks:tasks.results,classes:classes.results,updates:updates.results,subscriptions:subs.results[0].n,pushKey:env.VAPID_PUBLIC_KEY||null,pushReady:!!env.VAPID_PRIVATE_KEY,connection:await setting(env.DB,'connection')||'Not connected · imported records only',lastSync:await setting(env.DB,'last_sync'),lastTick:await setting(env.DB,'last_tick'),partial});
  }
  if(request.method!=='POST')return json({error:'Not found'},404);
  switch(url.pathname){
