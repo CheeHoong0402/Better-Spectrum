@@ -15,6 +15,16 @@ export function parseWeeks(value){
  return [...new Set(numbers)].sort((a,b)=>a-b);
 }
 function row(){return {id:crypto.randomUUID(),course:'',name:'',kind:'Lecture',weekday:1,start:'',end:'',room:'',occ:'',weeksText:''};}
+export function copyWeekRows(classes,courses,previous,dateKey){
+ const used=new Set();
+ return classes.map(c=>{
+  const weekday=((new Date(dateKey(c.starts)+'T00:00:00Z').getUTCDay()+6)%7)+1,start=mytTime(c.starts),end=mytTime(c.ends);
+  const candidates=previous.filter(s=>!used.has(s.id)&&s.course===c.course&&s.kind===c.kind&&s.weekday===weekday&&s.occ===(c.occ||''));
+  const match=candidates.find(s=>s.start===start&&s.end===end)||(candidates.length===1?candidates[0]:null);
+  if(match)used.add(match.id);
+  return {...(match||row()),course:c.course,name:match?.name||courses.find(course=>course.code===c.course)?.name||c.course,kind:c.kind,weekday,start,end,room:c.room||'',occ:c.occ||''};
+ });
+}
 function edit(definition){return {...structuredClone(definition),teachingText:definition.teachingWeeks.join(', '),excludedText:definition.excludedDates.join('\n'),series:definition.series.map(s=>({...s,weeksText:s.weeks.join(', ')}))};}
 function ensure(state){
  if(route===location.hash&&draft)return;
@@ -78,7 +88,7 @@ export function bindSemester(state,{api,load,render,toast,fmt,dateKey}){
   const classes=state.classes.filter(c=>{const d=Date.parse(dateKey(c.starts)+'T00:00:00Z');return d>=monday&&d<monday+7*86400000;});
   if(!classes.length){error(new Error('There are no saved classes in that week.'));return;}
   if(!confirm('Replace the weekly rows with this saved week? You will review them before saving.'))return;
-  capture();draft.series=classes.map(c=>({...row(),course:c.course,name:state.courses.find(course=>course.code===c.course)?.name||c.course,kind:c.kind,weekday:((new Date(dateKey(c.starts)+'T00:00:00Z').getUTCDay()+6)%7)+1,start:mytTime(c.starts),end:mytTime(c.ends),room:c.room||'',occ:c.occ||''}));
+  capture();draft.series=copyWeekRows(classes,state.courses,draft.series,dateKey);
   preview=null;render();
  };
  document.querySelector('#save-semester').onclick=async event=>{
