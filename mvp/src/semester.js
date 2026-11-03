@@ -21,8 +21,10 @@ export function validateSemester(input){
  const start=date(input.start,'semester start date'),end=date(input.end,'semester end date'),week1=date(input.week1,'week 1 Monday');
  if(end<start||Date.parse(end)-Date.parse(start)>370*dayMs)fail('The semester must end within one year of its start.');
  if(new Date(week1+'T00:00:00Z').getUTCDay()!==1||week1>start||Date.parse(start)-Date.parse(week1)>6*dayMs)fail('Week 1 must start on the Monday of the semester’s first week.');
- const teachingWeeks=weeks(input.teachingWeeks,'teaching weeks');if(!teachingWeeks.length)fail('Choose at least one teaching week.');
  const lastWeek=Math.floor((Date.parse(end)-Date.parse(week1))/(7*dayMs))+1;
+ if(input.allWeeks!==undefined&&typeof input.allWeeks!=='boolean')fail('Choose a valid weekly default.');
+ const allWeeks=input.allWeeks===true||input.teachingWeeks===undefined||(Array.isArray(input.teachingWeeks)&&!input.teachingWeeks.length);
+ const teachingWeeks=allWeeks?Array.from({length:lastWeek},(_,i)=>i+1):weeks(input.teachingWeeks,'teaching weeks');
  if(teachingWeeks.some(w=>w>lastWeek))fail('Teaching weeks must fall inside the semester.');
  if(!Array.isArray(input.excludedDates)||input.excludedDates.length>370)fail('Enter a valid list of excluded dates.');
  const excludedDates=[...new Set(input.excludedDates.map(d=>date(d,'excluded date')))].sort();
@@ -35,7 +37,7 @@ export function validateSemester(input){
   return {id:s.id,course:text(s.course,50,'course code',true),name:text(s.name||s.course,180,'course name',true),kind:text(s.kind,30,'class activity',true),weekday:s.weekday,start:s.start,end:s.end,room:text(s.room||'',160,'room'),occ:text(s.occ||'',30,'occurrence'),weeks:chosen};
  });
  if(new Set(series.map(s=>s.id)).size!==series.length)fail('Weekly class identifiers must be unique.');
- return {id:input.id,revision:input.revision,name:text(input.name,100,'semester name',true),start,end,week1,teachingWeeks,excludedDates,series};
+ return {id:input.id,revision:input.revision,name:text(input.name,100,'semester name',true),start,end,week1,allWeeks,teachingWeeks,excludedDates,series};
 }
 
 export function semesterClasses(definition){

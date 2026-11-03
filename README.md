@@ -33,7 +33,7 @@ Application code has one source: this repository. Local production configuration
 
 ## Semester timetable
 
-Timetable → Plan semester lets you enter the term dates, teaching weeks, excluded dates and weekly classes. Week numbers count calendar weeks from the chosen Week 1 Monday; leave break weeks out of the teaching-week list. Per-class weeks support alternating patterns.
+Timetable → Plan semester lets you enter the term dates, excluded dates and weekly classes. Teaching weeks defaults to every week within the semester dates when left blank. To skip whole break weeks, enter specific teaching weeks. Week numbers count calendar weeks from the chosen Week 1 Monday. Per-class weeks support alternating patterns.
 
 Preview before confirming. A repeated save updates the same semester. Existing matching dated classes are adopted and protected; individual edits and cancellations survive later updates. Removing a weekly row removes only its unedited generated occurrences. Use the date-specific class editor for a replacement class or room change. Export/import JSON preserves the schedule's identifiers; an import never writes records until preview and confirmation.
 

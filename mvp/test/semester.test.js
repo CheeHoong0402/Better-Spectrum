@@ -19,6 +19,27 @@ test('semester generation respects teaching weeks, holidays, class weeks and Mal
  d.series[0].weekday=7;d.series[0].start='00:30';d.series[0].end='01:30';
  assert.equal(semesterClasses(d)[0].starts,'2027-01-16T16:30:00.000Z');
 });
+test('blank or omitted teaching weeks repeat through the entire bounded semester',()=>{
+ for(const teachingWeeks of [[],undefined]){
+  const d=validateSemester({...definition(),teachingWeeks,excludedDates:[]});
+  assert.deepEqual(d.teachingWeeks,[1,2,3,4]);assert.equal(semesterClasses(d).length,4);
+  const longer=validateSemester({...d,end:'2027-02-07'});assert.equal(longer.allWeeks,true);assert.equal(semesterClasses(longer).length,5);
+ }
+ const clipped=validateSemester({...definition(),start:'2027-01-06',end:'2027-01-26',teachingWeeks:[],excludedDates:['2027-01-25']});
+ assert.deepEqual(semesterClasses(clipped).map(c=>c.date),['2027-01-11','2027-01-18']);
+});
+test('default weekly repetition still preserves individual edits and cancellations',async()=>{
+ const {DB,sqlite}=database();
+ try{
+  const d={...definition(),teachingWeeks:[],excludedDates:[]};await save(DB,d);
+  const rows=sqlite.prepare('SELECT * FROM classes ORDER BY starts').all();
+  await request(DB,'classes',{...rows[0],room:'Changed for this day'});await request(DB,'class-delete',{id:rows[1].id});
+  d.revision=1;d.series[0].start='09:00';d.series[0].end='11:00';await save(DB,d);
+  assert.equal(sqlite.prepare('SELECT room FROM classes WHERE id=?').get(rows[0].id).room,'Changed for this day');
+  assert.equal(sqlite.prepare('SELECT * FROM classes WHERE id=?').get(rows[1].id),undefined);
+  assert.equal(sqlite.prepare('SELECT starts FROM classes WHERE id=?').get(rows[2].id).starts,'2027-01-18T01:00:00.000Z');
+ }finally{sqlite.close();}
+});
 test('semester input rejects impossible dates, unbounded ranges and invalid weekly classes',()=>{
  for(const change of [{id:undefined},{start:'2027-02-30'},{end:'2029-01-01'},{week1:'2027-01-05'},{teachingWeeks:[0]},{teachingWeeks:[5]},{excludedDates:['2027-02-01']},{series:[]}])assert.throws(()=>validateSemester({...definition(),...change}));
  const d=definition();d.series[0].end='07:00';assert.throws(()=>validateSemester(d));
