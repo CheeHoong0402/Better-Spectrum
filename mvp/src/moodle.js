@@ -1,4 +1,5 @@
 import {digest,seal,unseal} from './security.js';
+import {courseScope,groupNumbers} from './course-scope.js';
 export async function setting(db,k,v){if(v===undefined)return (await db.prepare('SELECT value FROM settings WHERE key=?').bind(k).first())?.value;await db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').bind(k,String(v)).run();}
 export async function call(token,fn,args={}){
  const p=new URLSearchParams({wstoken:token,wsfunction:fn,moodlewsrestformat:'json',...args});
@@ -39,17 +40,37 @@ export async function syncCourse(env,index){
  const courses=(await currentCourses(env.DB)).filter(c=>c.id!=null);if(!courses.length)return;
  const c=courses[index%courses.length];
  const sections=await call(token,'core_course_get_contents',{courseid:c.id});
+ let membership;
+ try{membership=await call(token,'core_group_get_course_user_groups',{courseid:c.id});if(!Array.isArray(membership.groups)||membership.warnings?.length)throw new Error('Incomplete group response');}
+ catch{await setting(env.DB,`partial:${c.id}`,`${c.code}: Group membership unavailable; course updates are paused to avoid other groups.`);throw new Error('SPeCTRUM group membership could not be verified.');}
+ const numbers=[...new Set(membership.groups.flatMap(g=>/@(\d+)$/.test(g.idnumber||'')?[Number(g.idnumber.match(/@(\d+)$/)[1])]:groupNumbers(g.name,true)))];
+ if(!numbers.length)throw new Error('SPeCTRUM did not identify your OCC or tutorial group.');
+ const groupIds=new Set(membership.groups.map(g=>Number(g.id)));
+ const config=JSON.parse(await setting(env.DB,`course_scope:${c.id}`)||'{}');
+ const scope=courseScope(sections,numbers,config),scopeReady=await setting(env.DB,`scope_baseline:${c.id}`);
  const base=await setting(env.DB,`baseline:${c.id}`),round=Number(await setting(env.DB,`sync_round:${c.id}`))||0;
  const events=[],writes=[],warnings=new Set();
- const modules=sections.flatMap(s=>s.modules||[]),forums=modules.filter(m=>m.modname==='forum').sort((a,b)=>a.id-b.id);
+ const membershipKey=JSON.stringify([...groupIds].sort((a,b)=>a-b));
+ if(await setting(env.DB,`scope_membership:${c.id}`)!==membershipKey)writes.push(env.DB.prepare("UPDATE content_scopes SET allowed=0 WHERE course=? AND id LIKE 'post:%'").bind(c.code));
+ const nodeIds=new Set(scope.nodes.map(n=>n.id));
+ for(const old of (await env.DB.prepare('SELECT id FROM content_scopes WHERE course=? AND allowed=1').bind(c.code).all()).results)if(!old.id.startsWith('post:')&&!nodeIds.has(old.id))writes.push(env.DB.prepare('UPDATE content_scopes SET allowed=0 WHERE id=?').bind(old.id));
+ for(const node of scope.nodes)writes.push(env.DB.prepare('INSERT INTO content_scopes (id,course,allowed) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET allowed=excluded.allowed WHERE content_scopes.allowed<>excluded.allowed').bind(node.id,c.code,Number(node.allowed)));
+ if(!scopeReady)for(const node of scope.nodes){
+  const prefix=node.id+'-';
+  writes.push(env.DB.prepare('INSERT OR REPLACE INTO update_scopes SELECT id,? FROM updates WHERE course=? AND substr(id,1,length(?))=?').bind(node.id,c.code,prefix,prefix));
+  if(node.id.startsWith('module:')){const deadline=`deadline:assign-${node.id.slice(7)}:`;writes.push(env.DB.prepare('INSERT OR REPLACE INTO update_scopes SELECT id,? FROM updates WHERE course=? AND substr(id,1,length(?))=?').bind(node.id,c.code,deadline,deadline));}
+ }
+ const modules=scope.modules,forums=modules.filter(m=>m.modname==='forum').sort((a,b)=>a.id-b.id);
  const forumIds=new Set(Array.from({length:Math.min(3,forums.length)},(_,i)=>forums[(round*3+i)%forums.length].id));
  if(forums.length>3)warnings.add('Some forum discussions were not checked this pass; checks rotate between forums.');
  const snapshots=new Map((await env.DB.prepare('SELECT id,hash FROM snapshots').all()).results.map(s=>[s.id,s.hash]));
  async function watch(id,value,title,kind,url,baseline=base){
   const hash=await digest(JSON.stringify(value));const old=snapshots.get(id);
-  if(baseline&&(!old||old!==hash))events.push({id:`${id}-${hash}`,course:c.code,title:old?`Updated: ${title}`:`New: ${title}`,body:kind==='announcement'?clean(value.message||value.description||value.name||value.title):'Open SPeCTRUM to view the latest version.',kind,url});
+  if(baseline&&(!old||old!==hash))events.push({id:`${id}-${hash}`,scope:id,course:c.code,title:old?`Updated: ${title}`:`New: ${title}`,body:kind==='announcement'?clean(value.message||value.description||value.name||value.title):'Open SPeCTRUM to view the latest version.',kind,url});
   writes.push(env.DB.prepare('INSERT OR REPLACE INTO snapshots VALUES (?,?)').bind(id,hash));
+  writes.push(env.DB.prepare('INSERT OR IGNORE INTO update_scopes SELECT id,? FROM updates WHERE course=? AND substr(id,1,length(?))=?').bind(id,c.code,id+'-',id+'-'));
  }
+ for(const s of scope.sections)if(s.summary)await watch(`section:${s.id}`,{name:s.name,description:s.summary},s.name,'announcement',`https://spectrum.um.edu.my/course/view.php?id=${c.id}#section-${s.section}`,!!(base&&scopeReady));
  for(const m of modules){
    if(['assign','attendance','quiz'].includes(m.modname))continue;
    await watch(`module:${m.id}`,{name:m.name,description:m.description,files:(m.contents||[]).map(f=>({name:f.filename,modified:f.timemodified,size:f.filesize,url:f.fileurl}))},m.name,m.modname==='forum'||m.modname==='label'?'announcement':'material',m.url||`https://spectrum.um.edu.my/course/view.php?id=${c.id}`);
@@ -58,7 +79,11 @@ export async function syncCourse(env,index){
      const forum=await call(token,'mod_forum_get_forum_discussions',{forumid:m.instance,perpage:10});
      if(!Array.isArray(forum.discussions)||forum.warnings?.length)throw new Error('Incomplete forum response');
      const forumBase=!!(base&&await setting(env.DB,`forum_baseline:${m.id}`));
-     for(const post of forum.discussions)await watch(`post:${post.discussion}`,{title:post.name,message:post.message,modified:post.timemodified},post.name,'announcement',`https://spectrum.um.edu.my/mod/forum/discuss.php?d=${post.discussion}`,forumBase);
+     for(const post of forum.discussions){
+      const groups=groupNumbers(post.name),allowed=(!(Number(post.groupid)>0)||groupIds.has(Number(post.groupid)))&&(!groups.length||groups.some(n=>numbers.includes(n)));
+      writes.push(env.DB.prepare('INSERT INTO content_scopes (id,course,allowed,parent_id) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET allowed=excluded.allowed,parent_id=excluded.parent_id WHERE content_scopes.allowed<>excluded.allowed OR content_scopes.parent_id IS NOT excluded.parent_id').bind(`post:${post.discussion}`,c.code,Number(allowed),`module:${m.id}`));
+      if(allowed)await watch(`post:${post.discussion}`,{title:post.name,message:post.message,modified:post.timemodified},post.name,'announcement',`https://spectrum.um.edu.my/mod/forum/discuss.php?d=${post.discussion}`,forumBase);
+     }
      writes.push(env.DB.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').bind(`forum_baseline:${m.id}`,'1'));
     }catch{warnings.add('Forum posts unavailable; course content is monitored.');}
    }
@@ -66,11 +91,13 @@ export async function syncCourse(env,index){
  const response=await call(token,'mod_assign_get_assignments',{'courseids[0]':c.id});
  if(!Array.isArray(response.courses))throw new Error('SPeCTRUM did not return assignment data.');
  if(response.warnings?.length)warnings.add('Some assignments are unavailable from SPeCTRUM.');
- const assignments=(response.courses||[]).flatMap(course=>course.assignments||[]).filter(a=>a.duedate).sort((a,b)=>a.id-b.id);
+ const allowedModules=new Set(modules.filter(m=>m.modname==='assign').map(m=>Number(m.id)));
+ const assignments=(response.courses||[]).filter(course=>course.id==null||Number(course.id)===Number(c.id)).flatMap(course=>course.assignments||[]).filter(a=>a.duedate&&allowedModules.has(Number(a.cmid))).sort((a,b)=>a.id-b.id);
  const statusIds=new Set(Array.from({length:Math.min(8,assignments.length)},(_,i)=>assignments[(round*8+i)%assignments.length].id));
  if(assignments.length>8)warnings.add('Some submission statuses were not checked this pass; checks rotate and last known results are kept.');
  for(const a of assignments){
   const id=`assign-${a.cmid}`, due=new Date(a.duedate*1000).toISOString(),url=`https://spectrum.um.edu.my/mod/assign/view.php?id=${a.cmid}`;
+  writes.push(env.DB.prepare('INSERT OR IGNORE INTO update_scopes SELECT id,? FROM updates WHERE course=? AND substr(id,1,length(?))=?').bind(`module:${a.cmid}`,c.code,`deadline:${id}:`,`deadline:${id}:`));
   const old=await env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(id).first();let status=old?.status||'unknown';
   if(statusIds.has(a.id))try{
    const s=await call(token,'mod_assign_get_submission_status',{assignid:a.id});
@@ -81,12 +108,12 @@ export async function syncCourse(env,index){
   const changes=[env.DB.prepare('INSERT INTO tasks (id,course,title,due,status,source,url) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET course=excluded.course,title=excluded.title,due=excluded.due,status=excluded.status,url=excluded.url').bind(id,c.code,clean(a.name),due,status,'SPeCTRUM',url)];
   if(status==='submitted'||(old&&Date.parse(old.due)!==Date.parse(due)))changes.push(env.DB.prepare("DELETE FROM deliveries WHERE sent IS NULL AND substr(id,1,length(?)+6)='task:'||?||':'").bind(id,id));
   await env.DB.batch(changes);
-  if(base&&(!old||Date.parse(old.due)!==Date.parse(due)))events.push({id:`deadline:${id}:${due}`,course:c.code,title:old?'Assignment deadline changed':`New assignment: ${clean(a.name)}`,body:`Due ${new Date(due).toLocaleString('en-GB',{timeZone:'Asia/Kuala_Lumpur'})} MYT`,kind:'deadline',url});
+  if(base&&(!old||Date.parse(old.due)!==Date.parse(due)))events.push({id:`deadline:${id}:${due}`,scope:`module:${a.cmid}`,course:c.code,title:old?'Assignment deadline changed':`New assignment: ${clean(a.name)}`,body:`Due ${new Date(due).toLocaleString('en-GB',{timeZone:'Asia/Kuala_Lumpur'})} MYT`,kind:'deadline',url});
  }
  for(let i=0;i<writes.length;i+=80)await env.DB.batch(writes.slice(i,i+80));
- for(const e of events){await env.DB.prepare('INSERT OR IGNORE INTO updates (id,course,title,body,url,kind,changed) VALUES (?,?,?,?,?,?,?)').bind(e.id,e.course,e.title,e.body,e.url,e.kind,new Date().toISOString()).run();}
- if(warnings.size)await setting(env.DB,`partial:${c.id}`,`${c.code}: ${[...warnings].join(' ')}`);
- else await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(`partial:${c.id}`).run();
- await setting(env.DB,`sync_round:${c.id}`,round+1);
- await setting(env.DB,`baseline:${c.id}`,'1');await setting(env.DB,`synced:${c.id}`,new Date().toISOString());await setting(env.DB,'last_sync',new Date().toISOString());await setting(env.DB,'connection','Connected');return events;
+ for(const e of events)await env.DB.batch([env.DB.prepare('INSERT OR IGNORE INTO updates (id,course,title,body,url,kind,changed) VALUES (?,?,?,?,?,?,?)').bind(e.id,e.course,e.title,e.body,e.url,e.kind,new Date().toISOString()),env.DB.prepare('INSERT OR IGNORE INTO update_scopes VALUES (?,?)').bind(e.id,e.scope)]);
+ const checked=new Date().toISOString();
+ const checks=[[`sync_round:${c.id}`,round+1],[`scope_baseline:${c.id}`,'1'],[`scope_membership:${c.id}`,membershipKey],[`baseline:${c.id}`,'1'],[`synced:${c.id}`,checked],['last_sync',checked],['connection','Connected']].map(([key,value])=>env.DB.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').bind(key,String(value)));
+ checks.push(warnings.size?env.DB.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').bind(`partial:${c.id}`,`${c.code}: ${[...warnings].join(' ')}`):env.DB.prepare('DELETE FROM settings WHERE key=?').bind(`partial:${c.id}`));
+ await env.DB.batch(checks);return events;
 }
