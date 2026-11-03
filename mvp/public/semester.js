@@ -25,7 +25,7 @@ export function copyWeekRows(classes,courses,previous,dateKey){
   return {...(match||row()),course:c.course,name:match?.name||courses.find(course=>course.code===c.course)?.name||c.course,kind:c.kind,weekday,start,end,room:c.room||'',occ:c.occ||''};
  });
 }
-function edit(definition){return {...structuredClone(definition),teachingText:definition.teachingWeeks.join(', '),excludedText:definition.excludedDates.join('\n'),series:definition.series.map(s=>({...s,weeksText:s.weeks.join(', ')}))};}
+function edit(definition){return {...structuredClone(definition),teachingText:definition.allWeeks?'':definition.teachingWeeks.join(', '),excludedText:definition.excludedDates.join('\n'),series:definition.series.map(s=>({...s,weeksText:s.weeks.join(', ')}))};}
 function ensure(state){
  if(route===location.hash&&draft)return;
  route=location.hash;preview=null;
@@ -38,8 +38,8 @@ export function semesterView(state){
  return `<section class="semester-editor"><a href="#timetable">← Back to timetable</a><div class="heading-row"><div><p class="eyebrow">PLAN THE SEMESTER</p><h1>${draft.revision?'Edit semester':'New semester'}</h1><p>Confirm the dates and weekly pattern, then review every change before saving.</p></div></div>
  <form id="semester-form"><section class="panel"><h2>Semester dates</h2><div class="semester-fields">
  ${input('Semester name','name',draft.name,'text','required maxlength="100"')}${input('Start date','start',draft.start,'date','required')}${input('End date','end',draft.end,'date','required')}${input('Week 1 Monday','week1',draft.week1,'date','required')}
- ${input('Teaching weeks','teachingText',draft.teachingText,'text','required placeholder="1-6, 8-14" aria-describedby="weeks-help"')}
- <label>Dates without classes<textarea data-field="excludedText" rows="3" placeholder="YYYY-MM-DD, one date per line">${escape(draft.excludedText)}</textarea></label></div><p class="subtle" id="weeks-help">Week numbers count from Week 1 Monday, including break weeks. Leave breaks out of Teaching weeks. All class times are Malaysia time.</p></section>
+ ${input('Teaching weeks (optional)','teachingText',draft.teachingText,'text','placeholder="Every week in this semester" aria-describedby="weeks-help"')}
+ <label>Dates without classes<textarea data-field="excludedText" rows="3" placeholder="YYYY-MM-DD, one date per line">${escape(draft.excludedText)}</textarea></label></div><p class="subtle" id="weeks-help">Leave Teaching weeks blank to repeat every week within the semester dates. To skip breaks, enter specific weeks, such as 1-8, 10-15. Week numbers count from Week 1 Monday. Individual classes and the weekly pattern remain editable. All times are Malaysia time.</p></section>
  <section class="panel"><h2>Weekly classes</h2><p class="subtle">Each row is a weekly class. Leave its Weeks field empty to use all teaching weeks.</p>
  <div class="semester-copy"><label>Copy a saved week<input id="copy-week-date" type="date"></label><button type="button" id="copy-week">Use this week’s classes</button></div>
  <p class="subtle">Copying replaces the rows below. It proposes a weekly pattern; it does not save or repeat classes until you review and confirm.</p>
@@ -63,7 +63,7 @@ function capture(){
   s.weekday=Number(s.weekday);return s;
  });
 }
-function definition(){return {id:draft.id,revision:draft.revision,name:draft.name,start:draft.start,end:draft.end,week1:draft.week1,teachingWeeks:parseWeeks(draft.teachingText),excludedDates:draft.excludedText.split(/[,\s]+/).filter(Boolean),series:draft.series.map(s=>({id:s.id,course:s.course,name:s.name||s.course,kind:s.kind,weekday:s.weekday,start:s.start,end:s.end,room:s.room,occ:s.occ,weeks:parseWeeks(s.weeksText)}))};}
+function definition(){return {id:draft.id,revision:draft.revision,name:draft.name,start:draft.start,end:draft.end,week1:draft.week1,allWeeks:!draft.teachingText.trim(),teachingWeeks:parseWeeks(draft.teachingText),excludedDates:draft.excludedText.split(/[,\s]+/).filter(Boolean),series:draft.series.map(s=>({id:s.id,course:s.course,name:s.name||s.course,kind:s.kind,weekday:s.weekday,start:s.start,end:s.end,room:s.room,occ:s.occ,weeks:parseWeeks(s.weeksText)}))};}
 function clearPreview(){editVersion++;preview=null;document.querySelector('#save-semester').disabled=true;document.querySelector('#semester-preview').innerHTML='';document.querySelector('#semester-message').textContent='';}
 function error(e){const target=document.querySelector('#semester-error');if(target){target.textContent=e.message;target.focus();}}
 function showPreview(result,fmt){
