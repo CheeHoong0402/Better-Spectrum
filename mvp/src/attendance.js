@@ -3,12 +3,12 @@ import {seal,unseal,digest} from './security.js';
 import {courseScope,groupNumbers} from './course-scope.js';
 
 const origin='https://spectrum.um.edu.my';
-export class AttendanceError extends Error {}
+export class AttendanceError extends Error {constructor(message,code){super(message);this.code=code;}}
 const decode=s=>String(s||'').replace(/&(?:amp|quot|apos|lt|gt|nbsp);|&#(?:x[0-9a-f]+|\d+);/gi,x=>({'&amp;':'&','&quot;':'"','&apos;':"'",'&lt;':'<','&gt;':'>','&nbsp;':' '}[x]??String.fromCodePoint(Math.min(0x10ffff,x[2].toLowerCase()==='x'?parseInt(x.slice(3),16):parseInt(x.slice(2),10)))));
 const text=s=>decode(String(s||'').replace(/<[^>]*>/g,' ')).replace(/\s+/g,' ').trim();
 function attrs(tag){return Object.fromEntries([...tag.matchAll(/([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)].map(m=>[m[1],decode(m[2]??m[3])]));}
 function inputs(html){return [...html.matchAll(/<input\b[^>]*>/gi)].map(m=>({...attrs(m[0]),disabled:/\bdisabled(?:\s|=|>)/i.test(m[0])}));}
-function safeUrl(path){const u=new URL(path,origin);if(u.origin!==origin||u.username||u.password)throw new AttendanceError('SPeCTRUM requires a university sign-in page. Use attendance manually for now.');return u;}
+function safeUrl(path){const u=new URL(path,origin);if(u.origin!==origin||u.username||u.password)throw new AttendanceError('SPeCTRUM requires Microsoft university sign-in. Automatic attendance cannot connect through this form. Open SPeCTRUM and mark manually.','university_sign_in');return u;}
 
 // Only this normal web session visits marking pages; the mobile activity view can mark unrelated open sessions.
 export async function webSession(env,initial=''){
@@ -18,7 +18,7 @@ export async function webSession(env,initial=''){
  return async function web(path,body){
   let url=safeUrl(path),method=body?'POST':'GET';
   for(let n=0;n<6;n++){
-   const r=await fetch(url.href,{method,body:method==='POST'?body:undefined,redirect:'manual',signal:AbortSignal.timeout(15000),headers:{Cookie:[...jar].map(([k,v])=>`${k}=${v}`).join('; '),...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded',Origin:origin}:{})}});
+   let r;try{r=await fetch(url.href,{method,body:method==='POST'?body:undefined,redirect:'manual',signal:AbortSignal.timeout(15000),headers:{Cookie:[...jar].map(([k,v])=>`${k}=${v}`).join('; '),...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded',Origin:origin}:{})}});}catch{throw new AttendanceError('SPeCTRUM attendance could not be reached. Try again, or open SPeCTRUM to mark manually.');}
    for(const value of r.headers.getSetCookie()){const pair=value.split(';')[0],i=pair.indexOf('=');if(i>0){const k=pair.slice(0,i),v=pair.slice(i+1);if(v)jar.set(k,v);else jar.delete(k);}}
    if(r.status>=300&&r.status<400){url=safeUrl(new URL(r.headers.get('location'),url));if(r.status!==307&&r.status!==308){method='GET';body=undefined;}continue;}
    if(!r.ok)throw new AttendanceError('SPeCTRUM attendance is temporarily unavailable.');
@@ -31,14 +31,28 @@ export async function webSession(env,initial=''){
  };
 }
 function loggedIn(page){return !/name=["'](?:password|logintoken)["']/i.test(page.html)&&/\/login\/logout\.php\?[^"']*sesskey=/.test(page.html);}
+export async function checkAttendanceSupport(env){
+ try{
+  const web=await webSession(env,await seal('[]',env.AUTH_SECRET));
+  const login=await web('/login/index.php');
+  if(!inputs(login.html).some(i=>i.name==='logintoken'&&i.value))throw new AttendanceError('SPeCTRUM requires interactive sign-in. Open SPeCTRUM and mark attendance manually.','university_sign_in');
+  await setting(env.DB,'attendance_connection','Direct sign-in available');return {supported:true};
+ }catch(e){
+  if(e.code!=='university_sign_in')throw e;
+  await setAttendanceEnabled(env,false);
+  await env.DB.batch([env.DB.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').bind('attendance_connection','University sign-in required'),env.DB.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').bind('attendance_error',e.message),env.DB.prepare("DELETE FROM settings WHERE key='attendance_cookie'")]);
+  return {supported:false,message:e.message};
+ }
+}
 export async function connectAttendance(env,{username,password}){
  if(typeof username!=='string'||!username.trim()||username.length>200||typeof password!=='string'||!password||password.length>500)throw new AttendanceError('Enter your Siswa email and SPeCTRUM password.');
  const encrypted=await setting(env.DB,'moodle_token');if(!encrypted)throw new AttendanceError('Connect SPeCTRUM course sync first.');
+ const support=await checkAttendanceSupport(env);if(!support.supported)throw new AttendanceError(support.message);
  const throttle=Number(await setting(env.DB,'attendance_login_after')||0);if(throttle>Date.now())throw new AttendanceError('Wait a minute before trying attendance sign-in again.');
  await setting(env.DB,'attendance_login_after',Date.now()+60000);
  // Verify both connections identify the same student before retaining any browser session.
- const r=await fetch(origin+'/login/token.php',{method:'POST',redirect:'error',body:new URLSearchParams({username:username.trim(),password,service:'moodle_mobile_app'}),signal:AbortSignal.timeout(20000)});
- const credentials=await r.json();if(!r.ok||!credentials.token)throw new AttendanceError('SPeCTRUM could not sign in. Check your details, or use SPeCTRUM directly if university sign-in is required.');
+ let r,credentials;try{r=await fetch(origin+'/login/token.php',{method:'POST',redirect:'error',body:new URLSearchParams({username:username.trim(),password,service:'moodle_mobile_app'}),signal:AbortSignal.timeout(20000)});credentials=await r.json();}catch{throw new AttendanceError('SPeCTRUM did not return a usable sign-in response. Open SPeCTRUM and mark attendance manually.');}
+ if(!r.ok||!credentials.token)throw new AttendanceError('SPeCTRUM could not sign in. Check your details, or use SPeCTRUM directly if university sign-in is required.');
  const [current,provided]=await Promise.all([call(await unseal(encrypted,env.AUTH_SECRET),'core_webservice_get_site_info'),call(credentials.token,'core_webservice_get_site_info')]);
  if(current.userid!==provided.userid)throw new AttendanceError('Use the same student account as your connected courses.');
  const web=await webSession(env,await seal('[]',env.AUTH_SECRET));
