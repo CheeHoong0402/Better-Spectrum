@@ -18,7 +18,7 @@ export function parseCallback(value,passport){
  const parts=Buffer.from(encoded,'base64').toString('utf8').split(':::');
  const expected=createHash('md5').update(site+passport).digest('hex');
  if(!/^[a-f0-9]{32}$/i.test(parts[0]||'')||!timingSafeEqual(Buffer.from(parts[0].toLowerCase()),Buffer.from(expected)))throw Error('This reply does not match the sign-in you started.');
- if(parts.length!==3||!/^[a-zA-Z0-9]{16,128}$/.test(parts[1]||'')||!/^[a-zA-Z0-9]{16,128}$/.test(parts[2]||''))throw Error('Moodle did not return a private token. Start again in the private sign-in window and sign in afresh.');
+ if(parts.length!==3||!/^[a-zA-Z0-9]{16,128}$/.test(parts[1]||'')||!/^[a-zA-Z0-9]{16,128}$/.test(parts[2]||''))throw Error('Moodle did not return a private token. Sign out of SPeCTRUM in the chosen browser, generate a new pairing code, and retry a fresh SPeCTRUM sign-in.');
  return {token:parts[1],privateToken:parts[2]};
 }
 function powershell(code){
@@ -48,7 +48,7 @@ export async function startHelper({openPage=true}={}){
  protocol('install');
  const key=randomBytes(32).toString('hex'),expires=Date.now()+15*60000;
  let passport='',code='',result='Ready. Generate a pairing code in your planner, then paste it below.',busy=false,done=false;
- const page=()=>`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Better Spectrum sign-in helper</title><h1>Connect attendance through Microsoft</h1><p>This setup only reads an attendance report. Auto-marking stays off.</p><p>${result.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</p><form method="post" action="/start"><input type="hidden" name="key" value="${key}"><label>Planner pairing code <input name="code" required maxlength="72" autocomplete="off" size="50"></label><button ${busy||done?'disabled':''}>Sign in with Microsoft</button></form><p>Microsoft opens in a new Edge private window. Complete sign-in there and allow the link to open this helper. Return here and refresh for the result.</p><p>No Microsoft password is read or saved by this helper. Moodle credentials are sent only to your configured private planner.</p><a href="${planner}/#settings/timetable" rel="noreferrer">Open planner Settings</a>`;
+ const page=()=>`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Better Spectrum sign-in helper</title><h1>Connect attendance through Microsoft</h1><p>This setup only reads an attendance report. Auto-marking stays off.</p><p>${result.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</p><form method="post" action="/start"><input type="hidden" name="key" value="${key}"><label>Planner pairing code <input name="code" required maxlength="72" autocomplete="off" size="50"></label><label>Sign-in browser <select name="browser"><option value="default">Your usual browser (recommended)</option><option value="edge-private">Edge InPrivate</option></select></label><button ${busy||done?'disabled':''}>Sign in with Microsoft</button></form><p>Microsoft opens in your selected browser. If you are already signed into SPeCTRUM there, sign out of SPeCTRUM first so Moodle can issue the private token. Complete sign-in and allow the link to open this helper. Return here and refresh for the result.</p><p>No Microsoft password is read or saved by this helper. Moodle credentials are sent only to your configured private planner.</p><a href="${planner}/#settings/timetable" rel="noreferrer">Open planner Settings</a>`;
  const server=createServer(async(req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','same-origin');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Security-Policy',"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
   const local=`http://127.0.0.1:${server.address().port}`;
@@ -59,9 +59,10 @@ export async function startHelper({openPage=true}={}){
     if(req.headers.origin!==local)throw Error('Unexpected request origin.');
     const data=new URLSearchParams(await body(req));if(data.get('key')!==key||busy||done)throw Error('This helper session is not ready.');
     code=data.get('code')||'';if(!/^[a-f0-9-]{72}$/.test(code))throw Error('Paste the pairing code from your planner.');
+    const browser=data.get('browser')||'default';if(!['default','edge-private'].includes(browser))throw Error('Choose a supported sign-in browser.');
     passport=randomBytes(24).toString('hex');busy=true;
     const url=new URL(site+'/admin/tool/mobile/launch.php');url.search=new URLSearchParams({service:'moodle_mobile_app',passport,urlscheme:scheme}).toString();
-    try{open(url.href,true);}catch(e){busy=false;throw e;}
+    try{open(url.href,browser==='edge-private');}catch(e){busy=false;throw e;}
     result='Waiting for Microsoft sign-in. This window expires after 15 minutes.';res.writeHead(303,{Location:'/'});res.end();return;
    }
    if(req.method==='POST'&&req.url==='/callback'){
