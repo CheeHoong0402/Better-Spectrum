@@ -50,7 +50,7 @@ export async function startHelper({openPage=true}={}){
  let passport='',code='',result='Ready. Generate a pairing code in your planner, then paste it below.',busy=false,done=false;
  const page=()=>`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Better Spectrum sign-in helper</title><h1>Connect attendance through Microsoft</h1><p>This setup only reads an attendance report. Auto-marking stays off.</p><p>${result.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</p><form method="post" action="/start"><input type="hidden" name="key" value="${key}"><label>Planner pairing code <input name="code" required maxlength="72" autocomplete="off" size="50"></label><button ${busy||done?'disabled':''}>Sign in with Microsoft</button></form><p>Microsoft opens in a new Edge private window. Complete sign-in there and allow the link to open this helper. Return here and refresh for the result.</p><p>No Microsoft password is read or saved by this helper. Moodle credentials are sent only to your configured private planner.</p><a href="${planner}/#settings/timetable" rel="noreferrer">Open planner Settings</a>`;
  const server=createServer(async(req,res)=>{
-  res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Security-Policy',"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+  res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','same-origin');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Security-Policy',"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
   const local=`http://127.0.0.1:${server.address().port}`;
   try{
    if(req.headers.host!==new URL(local).host)throw Error('Unexpected helper host.');
@@ -71,7 +71,7 @@ export async function startHelper({openPage=true}={}){
      const r=await fetch(planner+'/api/attendance-handoff',{method:'POST',headers:{Origin:planner,'Content-Type':'application/json'},body:JSON.stringify({code,...credentials}),signal:AbortSignal.timeout(110000)});
      const answer=await r.json();if(!r.ok)throw Error(answer.error||'The planner could not verify this connection.');
      result=`Connected. Cloud read-only test passed for ${answer.verified.course}: ${answer.verified.rows} report rows. Auto-marking remains OFF. Open planner Settings to continue.`;
-    }catch(e){result=String(e.message).slice(0,350);}
+    }catch(e){done=false;result=String(e.message).slice(0,350)+' Generate a new pairing code to try again.';}
     code='';passport='';res.end('Accepted');return;
    }
    res.writeHead(404);res.end('Not found');
