@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {database} from '../test-support/db.js';
 import {seal} from '../src/security.js';
 import {setting} from '../src/moodle.js';
-import {parseReport,sessionDate,simpleForm,attendanceTick,confirmAttendance,setAttendanceEnabled,connectAttendance,webSession,refreshAttendance,attendanceState} from '../src/attendance.js';
+import {checkAttendanceSupport,parseReport,sessionDate,simpleForm,attendanceTick,confirmAttendance,setAttendanceEnabled,connectAttendance,webSession,refreshAttendance,attendanceState} from '../src/attendance.js';
 
 const logout='<a href="/login/logout.php?sesskey=csrf">Logout</a>';
 const table=(status='',label='Wed 4 Nov 2026 12PM - 2PM')=>`<table><tr><th class="datecol">Date</th><th class="statuscol">Status</th></tr><tr><td class="datecol">${label}</td><td class="desccol">Regular class session</td><td class="statuscol">${status||'<a href="/mod/attendance/attendance.php?sessid=42&amp;sesskey=csrf">Submit attendance</a>'}</td></tr></table>`;
@@ -97,4 +97,23 @@ test('attendance sign-in verifies the same student and saves no password',async 
  await connectAttendance(f.env,{username:'student@example.test',password:'never-save-this'});
  assert.equal(await setting(f.DB,'attendance_enabled'),'0');assert.doesNotMatch(JSON.stringify(f.sqlite.prepare('SELECT * FROM settings').all()),/never-save-this|newcookie/);
  identity=11;await setting(f.DB,'attendance_login_after',0);await assert.rejects(()=>connectAttendance(f.env,{username:'other@example.test',password:'secret'}),/same student/);
+});
+
+
+test('university sign-in is detected before any password request and clears pending automation',async t=>{
+ const f=await fixture(t);await confirmAttendance(f.env,{id:'row',classId:'class'});const requests=[];
+ globalThis.fetch=async(url,options)=>{requests.push({url,method:options.method});return new Response(null,{status:303,headers:{Location:'https://login.microsoftonline.com/university/oauth2/authorize'}});};
+ const r=await checkAttendanceSupport(f.env);assert.equal(r.supported,false);assert.match(r.message,/Microsoft university sign-in/);
+ assert.equal(await setting(f.DB,'attendance_enabled'),'0');assert.equal(await setting(f.DB,'attendance_cookie'),undefined);
+ assert.equal(f.sqlite.prepare('SELECT confirmed_class FROM attendance_sessions').get().confirmed_class,null);
+ await assert.rejects(()=>connectAttendance(f.env,{username:'student@example.test',password:'never-send-this'}),/university sign-in/);
+ assert.ok(requests.every(r=>r.method==='GET'&&r.url==='https://spectrum.um.edu.my/login/index.php'));
+});
+
+test('HTML or network failures during token sign-in produce useful errors without exposing credentials',async t=>{
+ const f=await fixture(t);
+ globalThis.fetch=async(url)=>url.endsWith('/login/token.php')?new Response('<html>University login</html>'):new Response('<input name="logintoken" value="csrf">');
+ await assert.rejects(()=>connectAttendance(f.env,{username:'student@example.test',password:'never-show-this'}),/usable sign-in response/);
+ globalThis.fetch=async()=>{throw Error('network details with secret');};
+ await assert.rejects(()=>checkAttendanceSupport(f.env),/could not be reached/);
 });
