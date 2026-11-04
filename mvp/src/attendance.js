@@ -15,7 +15,7 @@ export async function webSession(env,initial=''){
  const saved=initial||await setting(env.DB,'attendance_cookie');
  const jar=new Map(saved?JSON.parse(await unseal(saved,env.AUTH_SECRET)):[]);
  let stored=JSON.stringify([...jar]);
- return async function web(path,body){
+ const web=async function web(path,body){
   let url=safeUrl(path),method=body?'POST':'GET';
   for(let n=0;n<6;n++){
    let r;try{r=await fetch(url.href,{method,body:method==='POST'?body:undefined,redirect:'manual',signal:AbortSignal.timeout(15000),headers:{Cookie:[...jar].map(([k,v])=>`${k}=${v}`).join('; '),...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded',Origin:origin}:{})}});}catch{throw new AttendanceError('SPeCTRUM attendance could not be reached. Try again, or open SPeCTRUM to mark manually.');}
@@ -29,9 +29,56 @@ export async function webSession(env,initial=''){
   }
   throw new AttendanceError('SPeCTRUM sign-in did not complete.');
  };
+ web.adopt=async cookie=>{jar.clear();for(const [k,v] of JSON.parse(await unseal(cookie,env.AUTH_SECRET)))jar.set(k,v);stored=JSON.stringify([...jar]);};
+ web.cookie=()=>seal(JSON.stringify([...jar]),env.AUTH_SECRET);
+ return web;
 }
 function loggedIn(page){return !/name=["'](?:password|logintoken)["']/i.test(page.html)&&/\/login\/logout\.php\?[^"']*sesskey=/.test(page.html);}
+export async function pairAttendance(env){
+ if(!await setting(env.DB,'moodle_token'))throw new AttendanceError('Connect course sync first.');
+ const code=crypto.randomUUID()+crypto.randomUUID();
+ await setting(env.DB,'attendance_pair',JSON.stringify({hash:await digest(code),expires:Date.now()+600000}));
+ return {code,expires:new Date(Date.now()+600000).toISOString()};
+}
+export async function renewAttendance(env,credentials,persist=true){
+ const saved=await setting(env.DB,'attendance_mobile');
+ credentials||=saved?JSON.parse(await unseal(saved,env.AUTH_SECRET)):null;
+ if(!credentials)throw new AttendanceError('Reconnect with the Windows sign-in helper.');
+ if(Number(await setting(env.DB,'attendance_renew_after')||0)>Date.now())throw new AttendanceError('SPeCTRUM limits reconnects. Wait six minutes before trying again.');
+ await setting(env.DB,'attendance_renew_after',Date.now()+360000);
+ let result;
+ try{
+  const r=await fetch(origin+'/webservice/rest/server.php',{method:'POST',headers:{'User-Agent':'BetterSpectrum/1.0 (MoodleMobile compatible client)'},body:new URLSearchParams({wstoken:credentials.token,wsfunction:'tool_mobile_get_autologin_key',moodlewsrestformat:'json',privatetoken:credentials.privateToken}),signal:AbortSignal.timeout(20000)});
+  result=await r.json();if(!r.ok||result.exception||!result.key)throw new Error();
+ }catch{throw new AttendanceError('SPeCTRUM did not allow mobile auto-login. Reconnect with the helper after six minutes, or mark manually.');}
+ const url=safeUrl(result.autologinurl);if(url.pathname!=='/admin/tool/mobile/autologin.php'||!/^[a-zA-Z0-9_-]+$/.test(result.key))throw new AttendanceError('SPeCTRUM returned an unexpected auto-login response.');
+ url.search=new URLSearchParams({userid:String(credentials.userid),key:result.key,urltogo:origin+'/my/'}).toString();
+ const web=await webSession(env,await seal('[]',env.AUTH_SECRET)),page=await web(url.href);
+ if(!loggedIn(page))throw new AttendanceError('Mobile auto-login did not establish a signed-in session.');
+ if(persist)await setting(env.DB,'attendance_cookie',page.cookie);return web;
+}
+export async function acceptAttendanceHandoff(env,data){
+ if(typeof data.code!=='string'||data.code.length!==72||typeof data.token!=='string'||!/^[a-zA-Z0-9]{16,128}$/.test(data.token)||typeof data.privateToken!=='string'||!/^[a-zA-Z0-9]{16,128}$/.test(data.privateToken))throw new AttendanceError('Invalid attendance handoff. Generate a new pairing code.');
+ const raw=await setting(env.DB,'attendance_pair'),pair=JSON.parse(raw||'null');
+ if(!pair||pair.claimed||pair.expires<Date.now()||pair.hash!==await digest(data.code))throw new AttendanceError('Pairing code expired or was already used. Generate a new code in Settings.');
+ const claim=JSON.stringify({...pair,claimed:true});
+ const claimed=await env.DB.prepare("UPDATE settings SET value=? WHERE key='attendance_pair' AND value=? RETURNING key").bind(claim,raw).first();if(!claimed)throw new AttendanceError('Pairing code was already used.');
+ const current=await setting(env.DB,'moodle_token');if(!current)throw new AttendanceError('Connect course sync first.');
+ const [existing,provided]=await Promise.all([call(await unseal(current,env.AUTH_SECRET),'core_webservice_get_site_info'),call(data.token,'core_webservice_get_site_info')]);
+ if(!Number.isSafeInteger(provided.userid)||existing.userid!==provided.userid)throw new AttendanceError('Sign in using the same student account as course sync.');
+ await setAttendanceEnabled(env,false);
+ const credentials={token:data.token,privateToken:data.privateToken,userid:provided.userid};
+ const web=await renewAttendance(env,credentials,false),courses=(await currentCourses(env.DB)).filter(c=>c.id!=null&&c.code!=='WIX1003');
+ let verified=null;
+ for(const course of courses){const {items}=await modules(env,course);if(items.length){const page=await web(`/mod/attendance/view.php?id=${items[0].id}&view=5&lang=en`);if(!loggedIn(page))throw new AttendanceError('Attendance report sign-in could not be verified.');verified={course:course.code,rows:parseReport(page.html).length};break;}}
+ if(!verified)throw new AttendanceError('No eligible attendance report was found to verify this connection.');
+ if(await setting(env.DB,'attendance_pair')!==claim)throw new AttendanceError('Pairing was cancelled or replaced. Generate a new code.');
+ const values=[['attendance_mobile',await seal(JSON.stringify(credentials),env.AUTH_SECRET)],['attendance_cookie',await web.cookie()],['attendance_connection','Connected'],['attendance_error','']];
+ await env.DB.batch([...values.map(([k,v])=>env.DB.prepare("INSERT OR REPLACE INTO settings SELECT ?,? WHERE EXISTS (SELECT 1 FROM settings WHERE key='attendance_pair' AND value=?)").bind(k,v,claim)),env.DB.prepare("DELETE FROM settings WHERE key='attendance_pair' AND value=?").bind(claim)]);
+ return {ok:true,verified,enabled:false,message:'Cloud attendance report verified. Auto-marking remains off. You can enable it in Settings and confirm a class you attend.'};
+}
 export async function checkAttendanceSupport(env){
+ if(await setting(env.DB,'attendance_mobile')&&await setting(env.DB,'attendance_connection')==='Connected')return {supported:true};
  try{
   const web=await webSession(env,await seal('[]',env.AUTH_SECRET));
   const login=await web('/login/index.php');
@@ -111,7 +158,12 @@ async function modules(env,course){
  if(!numbers.length)throw new AttendanceError('Your course group could not be verified.');
  return {items:courseScope(sections,numbers,JSON.parse(await setting(env.DB,`course_scope:${course.id}`)||'{}')).modules.filter(m=>m.modname==='attendance'),numbers};
 }
-async function report(web,cmid){const page=await web(`/mod/attendance/view.php?id=${cmid}&view=5&lang=en`);if(!loggedIn(page))throw new AttendanceError('Attendance sign-in expired. Reconnect in Settings.');return parseReport(page.html);}
+async function report(web,cmid,env){
+ const path=`/mod/attendance/view.php?id=${cmid}&view=5&lang=en`;let page;
+ try{page=await web(path);if(!loggedIn(page))throw new AttendanceError('Attendance sign-in expired. Reconnect in Settings.');}
+ catch(e){if(!env||!await setting(env.DB,'attendance_mobile'))throw e;const fresh=await renewAttendance(env);await web.adopt(await setting(env.DB,'attendance_cookie'));page=await fresh(path);if(!loggedIn(page))throw new AttendanceError('Attendance sign-in expired. Reconnect with the helper.');}
+ return parseReport(page.html);
+}
 export async function attendanceState(env){
  const config=Object.fromEntries((await env.DB.prepare("SELECT key,value FROM settings WHERE key IN ('attendance_enabled','attendance_connection','attendance_checked','attendance_error')").all()).results.map(r=>[r.key,r.value]));
  return {enabled:config.attendance_enabled==='1',connected:config.attendance_connection==='Connected',connection:config.attendance_connection||'Not connected',lastCheck:config.attendance_checked||null,error:config.attendance_error||'',sessions:(await env.DB.prepare("SELECT * FROM attendance_sessions WHERE day>=? ORDER BY day,label LIMIT 80").bind(new Date(Date.now()+8*3600000-86400000).toISOString().slice(0,10)).all()).results};
@@ -123,7 +175,7 @@ export async function refreshAttendance(env,courseid,notify=async()=>{}){
  const {items:available,numbers}=await modules(env,course),web=await webSession(env),day=new Date(Date.now()+8*3600000).toISOString().slice(0,10),until=new Date(Date.now()+8*3600000+86400000).toISOString().slice(0,10);
  const writes=[];
  for(const m of available){
-  const rows=await report(web,m.id);
+  const rows=await report(web,m.id,env);
   for(const row of rows){const date=sessionDate(row.label),groups=groupNumbers(row.description,true);if(!date||date<day||date>until||groups.length&&!groups.some(n=>numbers.includes(n)))continue;
    const id=await digest(`${m.id}:${row.key}`);
    writes.push(env.DB.prepare('INSERT INTO attendance_sessions (id,course,course_id,cmid,name,row_key,day,label,session_id,recorded,manual,checked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id,recorded=excluded.recorded,manual=excluded.manual,checked=excluded.checked').bind(id,course.code,course.id,m.id,text(m.name),row.key,date,row.label,row.session,row.status,row.password?1:0,new Date().toISOString()));
@@ -167,7 +219,7 @@ export async function attendanceTick(env,notify,now=Date.now()){
   try{
    const course={id:a.course_id,code:a.course};
    const {items,numbers}=await modules(env,course);if(!items.some(m=>m.id===a.cmid))throw new AttendanceError('This attendance activity no longer matches your group.');
-   const web=await webSession(env);let row=(await report(web,a.cmid)).find(r=>r.key===a.row_key);
+   const web=await webSession(env);let row=(await report(web,a.cmid,env)).find(r=>r.key===a.row_key);
    if(!row)throw new AttendanceError('The session changed. Open SPeCTRUM to check it.');
    const groups=groupNumbers(row.description,true);if(groups.length&&!groups.some(n=>numbers.includes(n)))throw new AttendanceError('This attendance session belongs to another group.');
    if(row.status){await finish(row.status);continue;}
@@ -183,13 +235,13 @@ export async function attendanceTick(env,notify,now=Date.now()){
    if(!loggedIn(page))throw new AttendanceError('Attendance sign-in expired. Check SPeCTRUM manually.');
    const body=simpleForm(page.html,row.session);
    if(body){
-    const recorded=(await report(web,a.cmid)).find(r=>r.key===a.row_key)?.status;
+    const recorded=(await report(web,a.cmid,env)).find(r=>r.key===a.row_key)?.status;
     if(recorded){await finish(recorded);continue;}
     const current=await env.DB.prepare('SELECT a.confirmed_class,c.starts,c.ends FROM attendance_sessions a LEFT JOIN classes c ON c.id=a.confirmed_class WHERE a.id=?').bind(a.id).first();
     if(await setting(env.DB,'attendance_enabled')!=='1'||current?.confirmed_class!==c.id||current.starts!==c.starts||current.ends!==c.ends)throw new AttendanceError('Auto-marking stopped. Check the session in SPeCTRUM.');
     await web(`/mod/attendance/attendance.php?sessid=${row.session}&lang=en`,body);
    }
-   row=(await report(web,a.cmid)).find(r=>r.key===a.row_key);
+   row=(await report(web,a.cmid,env)).find(r=>r.key===a.row_key);
    if(!row?.status)throw new AttendanceError('Attendance could not be verified. A password, QR code, network restriction or unavailable status may require you to mark manually.');
    await finish(row.status);
    async function finish(status){
