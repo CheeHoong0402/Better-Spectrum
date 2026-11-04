@@ -7,3 +7,4 @@ node_modules/
 wrangler.production.jsonc
 public/sw.js
 public/release.json
+public/qr-decoder.js

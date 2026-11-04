@@ -1,9 +1,9 @@
 import {digest,seal,unseal} from './security.js';
 import {courseScope,groupNumbers} from './course-scope.js';
 export async function setting(db,k,v){if(v===undefined)return (await db.prepare('SELECT value FROM settings WHERE key=?').bind(k).first())?.value;await db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').bind(k,String(v)).run();}
-export async function call(token,fn,args={}){
+export async function call(token,fn,args={},headers={}){
  const p=new URLSearchParams({wstoken:token,wsfunction:fn,moodlewsrestformat:'json',...args});
- const r=await fetch('https://spectrum.um.edu.my/webservice/rest/server.php',{method:'POST',body:p,signal:AbortSignal.timeout(20000)});
+ const r=await fetch('https://spectrum.um.edu.my/webservice/rest/server.php',{method:'POST',headers,body:p,signal:AbortSignal.timeout(20000)});
  if(!r.ok)throw new Error('SPeCTRUM is temporarily unavailable.');
  let data;try{data=await r.json();}catch{throw new Error('SPeCTRUM did not return API data.');}
  if(data.exception)throw new Error(['invalidtoken','accessexception','webservice_access_exception'].includes(data.errorcode)?'SPeCTRUM access expired or this function is not permitted. Reconnect or check mobile access.':`SPeCTRUM could not complete ${fn}.`);

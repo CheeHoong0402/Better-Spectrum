@@ -7,6 +7,7 @@ const release=process.env.APP_RELEASE||process.env.GITHUB_SHA||(git.status===0?g
 if(!/^[\w.-]{1,100}$/.test(release))throw new Error('Invalid release identifier');
 const sw=await readFile('src/service-worker.js','utf8');
 await writeFile('public/sw.js',sw.replaceAll('__APP_RELEASE__',release));
+await writeFile('public/qr-decoder.js','/*!\n'+await readFile('node_modules/jsqr/LICENSE','utf8')+'\n*/\n'+await readFile('node_modules/jsqr/dist/jsQR.js','utf8'));
 const assets={};
 for(const entry of (await readdir('public',{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){
  if(entry.isFile()&&entry.name!=='release.json')assets[entry.name]=createHash('sha256').update(await readFile('public/'+entry.name)).digest('hex');

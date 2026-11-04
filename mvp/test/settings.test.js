@@ -20,6 +20,6 @@ test('settings rows lead to the existing functional controls',()=>{
  for(const id of ['connect-form','sync','disconnect'])assert.ok(connection.includes('id="'+id+'"'));
  assert.ok(settings('#settings/account').includes('id="logout"'));
  assert.ok(settings('#settings/timetable').includes('https://maya.um.edu.my/'));
- const attendance=settings('#settings/timetable');assert.match(attendance,/role="switch"/);assert.match(attendance,/WIX1003 lectures and tutorials stay manual/);assert.match(attendance,/id="attendance-support"/);
+ const attendance=settings('#settings/timetable');assert.match(attendance,/role="switch"/);assert.match(attendance,/WIX1003 lectures and tutorials stay manual/);assert.match(attendance,/id="attendance-support"/);assert.match(attendance,/id="attendance-qr"/);
  assert.ok(settings('#settings/unknown').includes('settings-menu'));
 });

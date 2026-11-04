@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {database} from '../test-support/db.js';
 import {seal,unseal} from '../src/security.js';
 import {setting} from '../src/moodle.js';
-import {pairAttendance,acceptAttendanceHandoff,renewAttendance,refreshAttendance} from '../src/attendance.js';
+import {pairAttendance,acceptAttendanceHandoff,renewAttendance,refreshAttendance,parseAttendanceQr,connectAttendanceQr} from '../src/attendance.js';
 import {parseCallback} from '../scripts/attendance-helper.mjs';
 import worker from '../src/worker.js';
 
@@ -28,6 +28,7 @@ async function fixture(t){
    const p=options.body;
    switch(p.get('wsfunction')){
     case 'core_webservice_get_site_info':return Response.json({userid:p.get('wstoken')==='existing-token'?42:userid});
+    case 'tool_mobile_get_tokens_for_qr_login':assert.match(options.headers['User-Agent'],/BetterSpectrum.*MoodleMobile/);assert.equal(p.get('userid'),'42');return Response.json({token,privatetoken:privateToken,warnings:[]});
     case 'tool_mobile_get_autologin_key':assert.equal(p.get('privatetoken'),privateToken);assert.match(options.headers['User-Agent'],/BetterSpectrum.*MoodleMobile/);return Response.json(deny?{exception:'moodle_exception'}:{key:'once-key',autologinurl:'https://spectrum.um.edu.my/admin/tool/mobile/autologin.php'});
     case 'core_course_get_contents':return Response.json([{id:1,name:'General',modules:[{id:100,modname:'attendance',name:'Lecture attendance'}]}]);
     case 'core_group_get_course_user_groups':return Response.json({groups:[{id:2,idnumber:'2026@2'}]});
@@ -79,4 +80,27 @@ test('expired report sessions renew through the saved mobile connection without 
  await setting(f.DB,'attendance_renew_after',0);await setting(f.DB,'attendance_cookie',await seal(JSON.stringify([['MoodleSession','expired']]),f.env.AUTH_SECRET));
  const previous=globalThis.fetch;globalThis.fetch=async(url,options)=>options?.headers?.Cookie?.includes('expired')?new Response(null,{status:303,headers:{Location:'https://login.microsoftonline.com/university'}}):previous(url,options);
  await refreshAttendance(f.env,1);assert.equal(f.requests.filter(r=>r.fn==='tool_mobile_get_autologin_key').length,2);assert.ok(!f.requests.some(r=>/\/attendance\.php/.test(r.url)));
+});
+
+
+test('QR login accepts only the pinned SPeCTRUM destination and exact user identity',()=>{
+ const key='q'.repeat(32),url=`moodlemobile://https://spectrum.um.edu.my?qrlogin=${key}&userid=42`;
+ assert.deepEqual(parseAttendanceQr(url),{key,userid:42});
+ for(const value of [url.replace('spectrum.um.edu.my','evil.example'),url+'&userid=43',url.replace('https://','http://'),url.replace('userid=42','userid=-1'),'not a QR link'])assert.throws(()=>parseAttendanceQr(value));
+});
+
+test('QR connection exchanges the one-time key and verifies a read-only cloud report',async t=>{
+ const f=await fixture(t),url=`moodlemobile://https://spectrum.um.edu.my?qrlogin=${'q'.repeat(32)}&userid=42`;
+ const r=await connectAttendanceQr(f.env,url);assert.equal(r.ok,true);assert.equal(r.enabled,false);assert.equal(r.verified.course,'WIA1007');
+ assert.equal(f.requests.filter(r=>r.fn==='tool_mobile_get_tokens_for_qr_login').length,1);
+ assert.ok(!f.requests.some(r=>/\/attendance\.php/.test(r.url)));
+ await assert.rejects(()=>connectAttendanceQr(f.env,url),/one minute/);
+});
+
+test('QR for another account and expired QR keys never establish a connection',async t=>{
+ const f=await fixture(t),url=`moodlemobile://https://spectrum.um.edu.my?qrlogin=${'q'.repeat(32)}&userid=43`;
+ await assert.rejects(()=>connectAttendanceQr(f.env,url),/same student/);assert.equal(f.requests.filter(r=>r.fn==='tool_mobile_get_tokens_for_qr_login').length,0);
+ const previous=globalThis.fetch;globalThis.fetch=async(url,options)=>options.body?.get?.('wsfunction')==='tool_mobile_get_tokens_for_qr_login'?Response.json({exception:'moodle_exception',errorcode:'invalidkey'}):previous(url,options);
+ await assert.rejects(()=>connectAttendanceQr(f.env,url.replace('userid=43','userid=42')),/fresh image/);
+ assert.equal(await setting(f.DB,'attendance_mobile'),undefined);
 });

@@ -40,6 +40,25 @@ export async function pairAttendance(env){
  await setting(env.DB,'attendance_pair',JSON.stringify({hash:await digest(code),expires:Date.now()+600000}));
  return {code,expires:new Date(Date.now()+600000).toISOString()};
 }
+export function parseAttendanceQr(value){
+ if(typeof value!=='string'||value.length>1200)throw new AttendanceError('Choose your SPeCTRUM mobile-app sign-in QR code.');
+ let url;try{url=new URL(value.trim().replace(/^[a-z][a-z0-9+.-]*:\/\/(?=https:\/\/)/i,''));}catch{throw new AttendanceError('This QR code is not a mobile-app sign-in link.');}
+ const key=url.searchParams.get('qrlogin'),userid=Number(url.searchParams.get('userid'));
+ if(url.origin!==origin||url.pathname!=='/'||url.username||url.password||url.hash||!key||!/^[a-zA-Z0-9_-]{16,128}$/.test(key)||!Number.isSafeInteger(userid)||userid<1||url.searchParams.getAll('qrlogin').length!==1||url.searchParams.getAll('userid').length!==1)throw new AttendanceError('Use the mobile-app QR code from your own SPeCTRUM profile.');
+ return {key,userid};
+}
+export async function connectAttendanceQr(env,value){
+ const qr=parseAttendanceQr(value),encrypted=await setting(env.DB,'moodle_token');if(!encrypted)throw new AttendanceError('Connect course sync first.');
+ const token=await unseal(encrypted,env.AUTH_SECRET),info=await call(token,'core_webservice_get_site_info');
+ if(info.userid!==qr.userid)throw new AttendanceError('Use the QR code for the same student account as course sync.');
+ if(Number(await setting(env.DB,'attendance_qr_after')||0)>Date.now())throw new AttendanceError('Wait one minute before trying a new QR code.');
+ await setting(env.DB,'attendance_qr_after',Date.now()+60000);
+ const pair=await pairAttendance(env);let credentials;
+ try{credentials=await call(token,'tool_mobile_get_tokens_for_qr_login',{qrloginkey:qr.key,userid:qr.userid},{'User-Agent':'BetterSpectrum/1.0 (MoodleMobile compatible client)'});}
+ catch{throw new AttendanceError('SPeCTRUM did not accept this QR code. Refresh your SPeCTRUM profile, open View QR code, and try a fresh image.');}
+ if(!credentials.token||!credentials.privatetoken||credentials.warnings?.length)throw new AttendanceError('SPeCTRUM did not return a complete mobile connection. Generate a fresh QR code and try again.');
+ return acceptAttendanceHandoff(env,{code:pair.code,token:credentials.token,privateToken:credentials.privatetoken});
+}
 export async function renewAttendance(env,credentials,persist=true){
  const saved=await setting(env.DB,'attendance_mobile');
  credentials||=saved?JSON.parse(await unseal(saved,env.AUTH_SECRET)):null;
