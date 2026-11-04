@@ -3,7 +3,7 @@ import {session,sign,digest,validPush,validDate} from './security.js';
 import {setting,connect,syncCourse,currentCourses} from './moodle.js';
 import {previewSemester,applySemester,SemesterError} from './semester.js';
 import {allowedScope} from './course-scope.js';
-import {AttendanceError,pairAttendance,acceptAttendanceHandoff,checkAttendanceSupport,attendanceState,connectAttendance,refreshAttendance,setAttendanceEnabled,confirmAttendance,attendanceTick} from './attendance.js';
+import {AttendanceError,pairAttendance,acceptAttendanceHandoff,connectAttendanceQr,checkAttendanceSupport,attendanceState,connectAttendance,refreshAttendance,setAttendanceEnabled,confirmAttendance,attendanceTick} from './attendance.js';
 const json=(v,status=200,extra={})=>Response.json(v,{status,headers:{'Cache-Control':'no-store',...extra}});
 export function reminderKey(type,item,sub){return `${type}:${item.id}:${item.due||item.starts}:${item.reminder_minutes}:${sub}`;}
 export function reminderDue(item,now){const end=Date.parse(item.due||item.starts);return end>now&&end-item.reminder_minutes*60000<=now;}
@@ -71,6 +71,7 @@ async function api(request,env,url){
  }
  if(request.method!=='POST')return json({error:'Not found'},404);
  switch(url.pathname){
+ case '/api/attendance-qr':return json(await connectAttendanceQr(env,data.url));
  case '/api/attendance-pair':return json(await pairAttendance(env));
  case '/api/attendance-support':return json(await checkAttendanceSupport(env));
  case '/api/attendance-connect':await connectAttendance(env,data);return json({ok:true});

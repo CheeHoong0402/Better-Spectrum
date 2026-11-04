@@ -16,10 +16,11 @@
     "test:http": "node scripts/http-smoke.mjs"
   },
   "dependencies": {
-    "@block65/webcrypto-web-push": "^2.0.0"
+    "@block65/webcrypto-web-push": "^2.0.0",
+    "jsqr": "^1.4.0"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0",
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "wrangler": "^4.0.0"
   }
 }
