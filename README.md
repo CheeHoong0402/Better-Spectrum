@@ -45,6 +45,8 @@ Dates must be reviewed against MAYA or TimeEdit. The app does not infer the seme
 - SPeCTRUM collection requires a supported token and remains bounded by the limits in `src/moodle.js`.
 - iPhone notifications require installation from Safari and a real-device delivery test. Provider acceptance does not prove phone display.
 - Only public app assets are cached offline. Private offline data is not implemented yet.
+- Offline starts and failed refreshes show a persistent retry message. Records already loaded in an open page remain visible with a freshness warning; a fresh offline launch needs a connection to retrieve private records.
+- Class and deadline forms show saving progress and retain their identifiers for safe retries after a lost response. A changed deadline retry cannot overwrite an earlier save; refresh to review the saved version. With no courses, the app offers course setup and resumes the requested form when courses become available in the current page session.
 - Weekly classes must start and end on the same day. Semester expansion is limited to 1,000 dated occurrences, with up to 40 weekly rows.
 - Signing out ends the session; it does not delete your cloud records.
 - Paid services and upgrades are not enabled by this project.

@@ -87,8 +87,14 @@ async function api(request,env,url){
  }
  case '/api/logout':return json({ok:true},200,{'Set-Cookie':'sm_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0'});
  case '/api/tasks':{
-  if(!data.title?.trim()||data.title.length>180||!validDate(data.due)||!data.course)return json({error:'Enter a course, title, and valid due date.'},400);
-  const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO tasks (id,course,title,due,status,source,reminder_minutes) VALUES (?,?,?,?,?,?,?)').bind(id,String(data.course).slice(0,50),data.title.trim(),new Date(data.due).toISOString(),'pending','manual',Math.max(0,Math.min(10080,Number(data.reminder_minutes)||120))).run();return json({ok:true});
+  if(typeof data.title!=='string'||!data.title.trim()||data.title.length>180||!validDate(data.due)||!data.course)return json({error:'Enter a course, title, and valid due date.'},400);
+  if(data.id&&(typeof data.id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data.id)))return json({error:'Invalid save identifier. Close this form and try again.'},400);
+  const id=data.id||crypto.randomUUID(),course=String(data.course).slice(0,50),title=data.title.trim(),due=new Date(data.due).toISOString(),reminder=Math.max(0,Math.min(10080,Number(data.reminder_minutes)||120));
+  // Keep the form's ID across retries so a lost response cannot create a second deadline.
+  await env.DB.prepare('INSERT INTO tasks (id,course,title,due,status,source,reminder_minutes) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(id,course,title,due,'pending','manual',reminder).run();
+  const saved=await env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(id).first();
+  if(!saved||saved.source!=='manual'||saved.course!==course||saved.title!==title||saved.due!==due||saved.reminder_minutes!==reminder)return json({error:'An earlier version of this deadline was already saved. Close this form and refresh to review it before making another change.'},409);
+  return json({ok:true});
  }
  case '/api/task-status':{
   const t=await env.DB.prepare('SELECT source FROM tasks WHERE id=?').bind(data.id).first();if(!t||t.source!=='manual')return json({error:'SPeCTRUM submission status must be confirmed by SPeCTRUM.'},400);

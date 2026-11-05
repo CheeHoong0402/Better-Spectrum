@@ -3,7 +3,7 @@ import {semesterView,bindSemester} from './semester.js';
 import {timetableView,applyTimetableLayout,updateTimetableClock} from './timetable.js';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state,week=0,filter='all',taskFilter='active',busy=false;
-let agendaDay,timetableDay;
+let agendaDay,timetableDay,pendingAdd,saving=false;
 const fmt=(d,opts={})=>new Date(d).toLocaleString('en-GB',{timeZone:'Asia/Kuala_Lumpur',...opts});
 const time=d=>fmt(d,{hour:'2-digit',minute:'2-digit',hour12:false});
 const day=d=>fmt(d,{weekday:'short',day:'numeric',month:'short'});
@@ -13,8 +13,24 @@ function color(code){return state.courses.find(c=>c.code===code)?.color||'#4263b
 function label(code){return state.courses.find(c=>c.code===code)?.name||code;}
 function external(url,text){try{const u=new URL(url);return u.protocol==='https:'&&u.hostname==='spectrum.um.edu.my'?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)} ↗</a>`:'';}catch{return '';}}
 function toast(s){$('#toast').textContent=s;$('#toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').hidden=true,6500);}
-async function api(path,data){const r=await fetch('/api/'+path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const v=await r.json();if(!r.ok){if(r.status===401){$('#app').hidden=true;$('#login').hidden=false;}throw new Error(v.error||'The request failed.');}return v;}
-async function load(){try{state=await api('state');$('#login').hidden=true;$('#app').hidden=false;render();}catch(e){if(!state){$('#login').hidden=false;$('#login-error').textContent=e.message;}else toast(e.message);}}
+async function api(path,data){
+ let r;try{r=await fetch('/api/'+path,{...(data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:['state','tasks','classes'].includes(path)?AbortSignal.timeout(30000):undefined});}catch{throw new Error('Could not reach your planner. Check your connection and try again.');}
+ let v;try{v=await r.json();}catch{throw new Error('Your planner returned an unexpected response. Please try again.');}
+ if(!r.ok){
+  if(r.status===401){state=null;$('#app').hidden=true;$('#load-status').hidden=true;$('#login').hidden=false;$('#login-error').textContent=v.error||'Sign in to continue.';for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();}
+  throw Object.assign(new Error(v.error||'The request failed. Please try again.'),{status:r.status});
+ }return v;
+}
+async function load(saved=false){
+ const retry=$('#retry-load');retry.disabled=true;
+ try{state=await api('state');$('#login').hidden=true;$('#app').hidden=false;$('#load-status').hidden=true;render();
+  if(pendingAdd&&state.courses.length){const type=pendingAdd;pendingAdd=null;$('#course-setup').close();editor(type);}
+  return true;
+ }catch(e){
+  if(e.status!==401){$('#load-status').hidden=false;$('#load-title').textContent=state?'Your records may be out of date':navigator.onLine===false?'You’re offline':'Couldn’t open your planner';$('#load-message').textContent=(saved?'Saved to your planner, but the screen could not refresh. ':state?'Showing your last loaded records. ':'Your saved records are kept in your private planner. ')+e.message;retry.hidden=false;}
+  return false;
+ }finally{retry.disabled=false;}
+}
 function status(t){return t.status==='submitted'?'Submitted':t.status==='done'?'Completed':t.status==='draft'?'Draft · not submitted':t.status==='unknown'?'Submission unverified':Date.parse(t.due)<Date.now()?'Overdue':'Upcoming';}
 const active=t=>!['submitted','done'].includes(t.status);
 function taskCard(t){return `<article class="task"><div class="task-meta"><span><span class="course-dot" data-color="${esc(t.course)}"></span>${esc(t.course)}</span><span class="${status(t)==='Overdue'?'danger':''}">${esc(status(t))}</span></div><div class="task-title">${esc(t.title)}</div><div class="task-meta"><span>${esc(day(t.due))} · ${time(t.due)}</span><span>${esc(t.source)}</span></div><div class="task-actions">${external(t.url,'Open assignment')}${t.source==='manual'?`<button class="quiet" data-complete="${esc(t.id)}">${active(t)?'Mark done':'Reopen'}</button><button class="quiet danger" data-delete-task="${esc(t.id)}">Remove</button>`:''}</div></article>`;}
@@ -61,7 +77,11 @@ function settings(){
  return `<div class="settings-page ${chosen?'settings-detail':'settings-menu'}"><header class="settings-header"><a href="${chosen?'#settings':'#today'}" aria-label="${chosen?'Back to settings':'Close settings'}">${chosen?'‹':'×'}</a><h1>${chosen?chosen.title:'Settings'}</h1></header>${chosen?`<div class="settings-detail-content">${chosen.content}</div>`:`<div class="settings-group">${row('account','Account','account')}${row('connection','SPeCTRUM connection','connection')}${row('notifications','Notifications','bell')}${row('timetable','Timetable & attendance','calendar')}</div><div class="settings-group">${row('about','About','about')}${row('help','Help','help')}</div><div class="settings-group settings-bottom"><button class="settings-row" id="logout">Log out</button><p class="settings-version">Better Spectrum · ${esc((state.release||'development').slice(0,12))}</p></div>`}</div>`;
 }
 function render(){const page=location.hash.slice(1).split('/')[0]||'today',views={today,timetable,tasks,updates,settings,semester};$('#view').innerHTML=(views[page]||today)();$('#page-label').textContent={today:'Today',timetable:'Timetable',tasks:'Deadlines',updates:'Course updates',settings:'Settings',semester:'Plan semester'}[page]||'Overview';document.querySelectorAll('nav a').forEach(a=>{a.classList.toggle('active',a.hash===`#${page==='semester'?'timetable':page}`);a.setAttribute('aria-current',a.hash===`#${page==='semester'?'timetable':page}`?'page':'false');});$('#semester-label').textContent=state.semesters?.at(-1)?.name||'Your saved timetable';$('#course-list').innerHTML=state.courses.map(c=>`<div class="course-small"><span class="course-dot" data-color="${esc(c.code)}"></span>${esc(c.code)}</div>`).join('');$('#connection-strip').innerHTML=`<span>${esc(state.lastSync?'Last course check '+fmt(state.lastSync,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'Imported timetable · live SPeCTRUM connection pending')}</span><a href="#settings">${state.lastSync?'Connection settings':'Connect your account'} →</a>`;document.querySelectorAll('[data-color]').forEach(e=>e.style.backgroundColor=color(e.dataset.color));document.querySelectorAll('[data-agenda-color]').forEach(e=>{const fill=color(e.dataset.agendaColor);e.style.backgroundColor=fill;const hex=/^#[0-9a-f]{6}$/i.test(fill)?fill:'#4263b5';const rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);e.style.color=rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722>.179?'#181818':'#ffffff';});document.querySelectorAll('[data-border]').forEach(e=>e.style.borderLeftColor=color(e.dataset.border));document.querySelectorAll('[data-week-color]').forEach(e=>{const fill=color(e.dataset.weekColor);e.style.setProperty('--course-color',/^#[0-9a-f]{6}$/i.test(fill)?fill:'#4263b5');});bind();}
-function editor(type,id){const c=state.classes.find(c=>c.id===id);const form=$('#editor-form');form.reset();form.elements.type.value=type;form.elements.id.value=id||'';$('#editor-title').textContent=type==='task'?'Add deadline':id?'Edit class':'Add class';$('#task-fields').hidden=type!=='task';$('#class-fields').hidden=type!=='class';form.elements.course.innerHTML=state.courses.map(c=>`<option>${esc(c.code)}</option>`).join('');if(c)for(const k of ['course','kind','room','occ'])form.elements[k].value=c[k]||'';for(const k of ['starts','ends'])if(c)form.elements[k].value=localInput(c[k]);$('#form-error').textContent='';$('#editor').showModal();}
+function editor(type,id){
+ if(saving)return;
+ if(!state.courses.length){pendingAdd=type;$('#setup-intent').textContent=type==='task'?'Before adding a deadline, add your courses.':'Before adding a class, add your courses.';$('#course-setup').showModal();return;}
+ const c=state.classes.find(c=>c.id===id);const form=$('#editor-form');form.reset();form.elements.type.value=type;form.elements.id.value=id||crypto.randomUUID();$('#editor-title').textContent=type==='task'?'Add deadline':id?'Edit class':'Add class';$('#task-fields').hidden=type!=='task';$('#class-fields').hidden=type!=='class';form.elements.course.innerHTML=state.courses.map(c=>`<option>${esc(c.code)}</option>`).join('');if(c)for(const k of ['course','kind','room','occ'])form.elements[k].value=c[k]||'';for(const k of ['starts','ends'])if(c)form.elements[k].value=localInput(c[k]);$('#form-error').textContent='';$('#editor').showModal();
+}
 function localInput(d){return dateKey(d)+'T'+time(d);}
 function bind(){
  applyTimetableLayout();
@@ -87,7 +107,21 @@ function bind(){
 }
 async function action(fn){if(busy)return;busy=true;document.body.setAttribute('aria-busy','true');try{await fn();}catch(e){toast(e.message);}finally{busy=false;document.body.removeAttribute('aria-busy');}}
 async function enablePush(){if(!('serviceWorker'in navigator)||!('PushManager'in window))throw new Error('Install this app on your iPhone Home Screen, then open it there to enable notifications.');if(!state.pushKey||!state.pushReady)throw new Error('Push keys need to be configured on the server first.');const permission=await Notification.requestPermission();if(permission!=='granted')throw new Error('Notifications were not enabled. Review this app in your phone’s notification settings.');const reg=await navigator.serviceWorker.ready;const raw=atob(state.pushKey.replace(/-/g,'+').replace(/_/g,'/'));const key=Uint8Array.from(raw,c=>c.charCodeAt(0));const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});await api('subscribe',sub.toJSON());await load();toast('This device is subscribed. Try the two-minute test.');}
-$('#editor-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target;const data=Object.fromEntries(new FormData(form));const type=data.type;for(const k of type==='task'?['due']:['starts','ends']){if(!data[k]){$('#form-error').textContent='Enter the required date and time.';return;}data[k]=new Date(data[k]+':00+08:00').toISOString();}if(type==='task'&&!data.title.trim()){$('#form-error').textContent='Give your deadline a title.';return;}try{await api(type==='task'?'tasks':'classes',data);$('#editor').close();await load();toast('Saved to your planner.');}catch(err){$('#form-error').textContent=err.message;}});
+$('#editor-form').addEventListener('submit',async e=>{
+ e.preventDefault();if(saving)return;
+ const form=e.target,data=Object.fromEntries(new FormData(form)),type=data.type;
+ for(const k of type==='task'?['due']:['starts','ends']){if(!data[k]){$('#form-error').textContent='Enter the required date and time.';return;}data[k]=new Date(data[k]+':00+08:00').toISOString();}
+ if(type==='task'&&!data.title.trim()){$('#form-error').textContent='Give your deadline a title.';return;}
+ saving=true;$('#editor-fields').disabled=true;$('#save-editor').textContent='Saving…';$('#form-error').textContent='Saving to your planner…';form.setAttribute('aria-busy','true');
+ try{await api(type==='task'?'tasks':'classes',data);$('#editor').close();if(await load(true))toast('Saved to your planner.');}
+ catch(err){$('#form-error').textContent=err.message+' Your entries are still here.'+(err.status===409?'':' Review them and retry Save to check or complete the same save.');}
+ finally{saving=false;$('#editor-fields').disabled=false;$('#save-editor').textContent='Save to my planner';form.removeAttribute('aria-busy');}
+});
+$('#editor').addEventListener('cancel',e=>{if(saving)e.preventDefault();});
+$('#retry-load').onclick=()=>load();
+$('#course-setup').querySelectorAll('a').forEach(a=>a.onclick=()=>$('#course-setup').close());
+$('#close-setup').onclick=()=>{pendingAdd=null;$('#course-setup').close();};
+$('#course-setup').addEventListener('cancel',()=>{pendingAdd=null;});
 $('#close-editor').onclick=()=>$('#editor').close();$('#login-form').addEventListener('submit',async e=>{e.preventDefault();try{await api('login',{password:$('#password').value});$('#password').value='';$('#login-error').textContent='';await load();}catch(e){$('#login-error').textContent=e.message;}});$('#refresh').onclick=()=>action(load);window.addEventListener('hashchange',()=>{if(state){render();if(location.hash.startsWith('#settings'))window.scrollTo(0,0);}});if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});load();
 
 $('#close-details').onclick=()=>$('#details').close();
