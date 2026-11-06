@@ -67,10 +67,11 @@ test('the notification switch recovers its real state after failed registration 
  assert.equal(f.device.errors.length,2);
 });
 
-test('denied notification permission leaves the switch off with a device-settings explanation',async()=>{
+test('denied notification permission leaves the switch off without the Settings helper line',async()=>{
  const f=await switchFixture();f.device.grant='denied';await f.change(true);
  assert.equal(f.toggle.checked,false);assert.equal(f.toggle.disabled,true);assert.equal(f.device.registered,false);
- assert.equal(f.hint.hidden,false);assert.match(f.hint.textContent,/device settings/);assert.equal(f.device.requests.length,0);
+ assert.equal(f.hint.hidden,true);assert.equal(f.hint.textContent,'');assert.equal(f.device.requests.length,0);
+ assert.match(f.device.errors[0],/device settings/);
 });
 
 test('push tests and delivery diagnostics stay on the selected subscribed device',async()=>{

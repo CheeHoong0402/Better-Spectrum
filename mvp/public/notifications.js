@@ -24,7 +24,7 @@ export function bindNotifications(state,{api,load,action,toast}){
   catch{device={status:'error'};}
   if(toggle?.isConnected){
    toggle.checked=device.status==='enabled';toggle.disabled=!['setup','enabled'].includes(device.status);
-   const hint=document.querySelector('#notifications-hint'),messages={unsupported:'Notifications are unavailable here.',blocked:'Allow notifications in your device settings.',unavailable:'Notifications are not configured.',error:'Could not check notifications.'};
+   const hint=document.querySelector('#notifications-hint'),messages={unsupported:'Notifications are unavailable here.',unavailable:'Notifications are not configured.',error:'Could not check notifications.'};
    hint.textContent=messages[device.status]||'';hint.hidden=!hint.textContent;
    if(!hint.hidden){const link=document.createElement('a');link.href='#settings/notifications';link.textContent=' Details';hint.append(link);}
   }
