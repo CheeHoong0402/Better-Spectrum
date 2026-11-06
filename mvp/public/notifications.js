@@ -1,5 +1,5 @@
 export function notificationPanel(){
- return `<section class="panel"><p class="eyebrow">PHONE NOTIFICATIONS</p><h2>Reminders on this device.</h2><div id="device-push" role="status">Checking this device’s notification setup…</div><details><summary>Delivery details</summary><p class="subtle">Delivery history for this device. Push-service acceptance does not confirm that a notification appeared on your screen.</p><button class="quiet" id="delivery-status" disabled>View delivery status for this device</button><div id="deliveries"></div></details></section>`;
+ return `<section class="panel"><h2>Reminders on this device.</h2><div id="device-push" role="status">Checking this device’s notification setup…</div><details><summary>Delivery details</summary><p class="subtle">Delivery history for this device. Push-service acceptance does not confirm that a notification appeared on your screen.</p><button class="quiet" id="delivery-status" disabled>View delivery status for this device</button><div id="deliveries"></div></details></section>`;
 }
 export function notificationSwitch(icon){
  return `<label class="settings-row attendance-toggle">${icon('bell')}<span>Notifications</span><input id="notifications-enabled" type="checkbox" role="switch" disabled aria-describedby="notifications-hint"></label><p class="subtle attendance-help" id="notifications-hint" hidden></p>`;

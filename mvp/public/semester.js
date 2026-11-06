@@ -39,7 +39,7 @@ function input(label,field,value,type='text',extra=''){return `<label>${label}<i
 export function semesterView(state){
  ensure(state);
  const latest=state.semesters?.find(s=>s.id===draft.id),conflict=latest&&latest.revision>draft.revision;
- return `<section class="semester-editor"><a href="#timetable">← Back to timetable</a><div class="heading-row"><div><p class="eyebrow">PLAN THE SEMESTER</p><h1>${draft.revision?'Edit semester':'New semester'}</h1><p>Confirm the dates and weekly pattern, then review every change before saving.</p></div></div>
+ return `<section class="semester-editor"><a href="#timetable">← Back to timetable</a><div class="heading-row"><div><h1>${draft.revision?'Edit semester':'New semester'}</h1></div></div>
  <p class="subtle">Unfinished changes stay in this browser tab through refreshes until you save, discard, or sign out.</p><form id="semester-form"><fieldset id="semester-fields"${saving?' disabled':''}>${conflict?'<div class="notice" role="alert"><p>This semester changed since you started this draft. Choose which version to review.</p><button type="button" id="reload-semester">Use saved version (discard draft)</button><button type="button" id="reapply-semester">Keep my draft for review</button></div>':''}<section class="panel"><h2>Semester dates</h2><div class="semester-fields">
  ${input('Semester name','name',draft.name,'text','required maxlength="100"')}${input('Start date','start',draft.start,'date','required')}${input('End date','end',draft.end,'date','required')}${input('Week 1 Monday','week1',draft.week1,'date','required')}
  ${input('Teaching weeks (optional)','teachingText',draft.teachingText,'text','placeholder="Every week in this semester" aria-describedby="weeks-help"')}
