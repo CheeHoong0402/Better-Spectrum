@@ -1,3 +1,4 @@
+export function semesterForDate(semesters,date){return semesters.filter(s=>s.start<=date&&s.end>=date).sort((a,b)=>b.start.localeCompare(a.start))[0]||null;}
 const DAY=86400000;
 
 export function weekLayout(classes,today,offset=0,filter='all'){
@@ -23,7 +24,7 @@ export function weekLayout(classes,today,offset=0,filter='all'){
 export function timetableView(state,{today,week,filter,selectedDay,esc,fmt,time,day,courseSelect,now=Date.now()}){
  const layout=weekLayout(state.classes,today,week,filter),{days,slots,start,end}=layout;
  const selected=days.find(d=>d.date===selectedDay)||days.find(d=>d.date===today)||days[0];
- const semester=state.semesters?.find(s=>s.start<=days.at(-1).date&&s.end>=days[0].date);
+ const semester=semesterForDate(state.semesters||[],selected.date);
  const weekNumber=semester?Math.floor((days[0].stamp-Date.parse(semester.week1+'T00:00:00+08:00'))/(7*DAY))+1:null;
  const weekCount=semester?Math.floor((Date.parse(semester.end+'T00:00:00+08:00')-Date.parse(semester.week1+'T00:00:00+08:00'))/(7*DAY))+1:null;
  const total=slots.reduce((sum,c)=>sum+(Math.min(Date.parse(c.ends),days[0].stamp+7*DAY)-Math.max(Date.parse(c.starts),days[0].stamp))/3600000,0);

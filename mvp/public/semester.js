@@ -1,4 +1,5 @@
-let draft,route,preview,editVersion=0;
+import {readDraft,writeDraft,deleteDraft} from './drafts.js';
+let draft,route,preview,editVersion=0,saving=false;
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const weekdays=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const mytTime=s=>new Date(s).toLocaleTimeString('en-GB',{timeZone:'Asia/Kuala_Lumpur',hour:'2-digit',minute:'2-digit',hour12:false});
@@ -30,13 +31,16 @@ function ensure(state){
  if(route===location.hash&&draft)return;
  route=location.hash;preview=null;
  const saved=state.semesters?.find(s=>s.id===route.split('/')[1]);
- draft=saved?edit(saved):{id:crypto.randomUUID(),revision:0,name:'',start:'',end:'',week1:'',teachingText:'',excludedText:'',series:[row()]};
+ draft=readDraft('semester:'+route)||(saved?edit(saved):{id:crypto.randomUUID(),revision:0,name:'',start:'',end:'',week1:'',teachingText:'',excludedText:'',series:[row()]});
 }
+export function resetSemesterDraft(){draft=null;route=null;preview=null;}
+function remember(){writeDraft('semester:'+route,draft);}
 function input(label,field,value,type='text',extra=''){return `<label>${label}<input data-field="${field}" type="${type}" value="${escape(value)}" ${extra}></label>`;}
 export function semesterView(state){
  ensure(state);
+ const latest=state.semesters?.find(s=>s.id===draft.id),conflict=latest&&latest.revision>draft.revision;
  return `<section class="semester-editor"><a href="#timetable">← Back to timetable</a><div class="heading-row"><div><p class="eyebrow">PLAN THE SEMESTER</p><h1>${draft.revision?'Edit semester':'New semester'}</h1><p>Confirm the dates and weekly pattern, then review every change before saving.</p></div></div>
- <form id="semester-form"><section class="panel"><h2>Semester dates</h2><div class="semester-fields">
+ <p class="subtle">Unfinished changes stay in this browser tab through refreshes until you save, discard, or sign out.</p><form id="semester-form"><fieldset id="semester-fields"${saving?' disabled':''}>${conflict?'<div class="notice" role="alert"><p>This semester changed since you started this draft. Choose which version to review.</p><button type="button" id="reload-semester">Use saved version (discard draft)</button><button type="button" id="reapply-semester">Keep my draft for review</button></div>':''}<section class="panel"><h2>Semester dates</h2><div class="semester-fields">
  ${input('Semester name','name',draft.name,'text','required maxlength="100"')}${input('Start date','start',draft.start,'date','required')}${input('End date','end',draft.end,'date','required')}${input('Week 1 Monday','week1',draft.week1,'date','required')}
  ${input('Teaching weeks (optional)','teachingText',draft.teachingText,'text','placeholder="Every week in this semester" aria-describedby="weeks-help"')}
  <label>Dates without classes<textarea data-field="excludedText" rows="3" placeholder="YYYY-MM-DD, one date per line">${escape(draft.excludedText)}</textarea></label></div><p class="subtle" id="weeks-help">Leave Teaching weeks blank to repeat every week within the semester dates. To skip breaks, enter specific weeks, such as 1-8, 10-15. Week numbers count from Week 1 Monday. Individual classes and the weekly pattern remain editable. All times are Malaysia time.</p></section>
@@ -50,10 +54,10 @@ export function semesterView(state){
  <label>Weekday<select data-field="weekday">${weekdays.map((day,n)=>`<option value="${n+1}" ${s.weekday===n+1?'selected':''}>${day}</option>`).join('')}</select></label>
  ${input('Start time','start',s.start,'time','required')}${input('End time','end',s.end,'time','required')}${input('Room / meeting details','room',s.room,'text','maxlength="160"')}${input('OCC / group','occ',s.occ,'text','maxlength="30"')}${input('Weeks (optional)','weeksText',s.weeksText,'text','placeholder="All teaching weeks"')}
  </div><button class="quiet danger" type="button" data-remove-series="${escape(s.id)}">Remove weekly class ${i+1}</button></fieldset>`).join('')}</div>
- <button type="button" id="add-weekly-class">+ Add weekly class</button></section>
- <p id="semester-error" class="danger" role="alert" tabindex="-1"></p><p id="semester-message" role="status"></p>
- <div class="actions"><button class="primary" type="submit">Preview changes</button><button type="button" id="save-semester" disabled>Confirm and save</button><button type="button" id="export-semester">Export schedule</button><label class="semester-import">Import schedule JSON<input id="import-semester" type="file" accept="application/json,.json"></label></div>
- </form><section id="semester-preview" aria-live="polite"></section></section>`;
+ <button type="button" id="add-weekly-class">+ Add weekly class</button>${draft.removedRows?.length?'<button type="button" id="undo-weekly-class">Undo weekly row removal</button>':''}</section>
+ <p id="semester-error" class="danger" role="alert" tabindex="-1"></p><p id="semester-message" role="status">${saving?'Saving your semester…':''}</p>
+ <div class="actions"><button class="primary" type="submit" ${conflict?'disabled':''}>Preview changes</button><button type="button" id="save-semester" disabled>Confirm and save</button><button type="button" id="discard-semester" class="quiet danger">Discard draft</button><button type="button" id="export-semester">Export schedule</button><label class="semester-import">Import schedule JSON<input id="import-semester" type="file" accept="application/json,.json"></label></div>
+ </fieldset></form><section id="semester-preview" aria-live="polite"></section></section>`;
 }
 function capture(){
  const form=document.querySelector('#semester-form');
@@ -61,11 +65,11 @@ function capture(){
  draft.series=[...form.querySelectorAll('[data-series]')].map(element=>{
   const s={id:element.dataset.series};for(const field of ['course','name','kind','weekday','start','end','room','occ','weeksText'])s[field]=element.querySelector(`[data-field="${field}"]`).value;
   s.weekday=Number(s.weekday);return s;
- });
+ });remember();
 }
 function definition(){return {id:draft.id,revision:draft.revision,name:draft.name,start:draft.start,end:draft.end,week1:draft.week1,allWeeks:!draft.teachingText.trim(),teachingWeeks:parseWeeks(draft.teachingText),excludedDates:draft.excludedText.split(/[,\s]+/).filter(Boolean),series:draft.series.map(s=>({id:s.id,course:s.course,name:s.name||s.course,kind:s.kind,weekday:s.weekday,start:s.start,end:s.end,room:s.room,occ:s.occ,weeks:parseWeeks(s.weeksText)}))};}
 function clearPreview(){editVersion++;preview=null;document.querySelector('#save-semester').disabled=true;document.querySelector('#semester-preview').innerHTML='';document.querySelector('#semester-message').textContent='';}
-function error(e){const target=document.querySelector('#semester-error');if(target){target.textContent=e.message;target.focus();}}
+function error(e){const target=document.querySelector('#semester-error');if(target){document.querySelector('#semester-message').textContent='';target.textContent=e.message;target.focus();}}
 function showPreview(result,fmt){
  const {counts,classes}=result;
  document.querySelector('#semester-preview').innerHTML=`<div class="panel"><h2>Review proposed changes</h2><p>${counts.added} added · ${counts.updated} updated · ${counts.removed} removed · ${counts.kept} kept · ${counts.cancelled} cancelled</p><p class="subtle">Individual edits and cancelled occurrences stay protected. Confirm these dates against your university timetable.</p><div class="semester-preview-scroll"><table><caption>Proposed dated classes, in Malaysia time</caption><thead><tr><th>Date</th><th>Course</th><th>Time</th><th>Room</th><th>Change</th></tr></thead><tbody>${classes.map(c=>`<tr><td>${escape(c.date)}</td><td>${escape(c.course)}<small>${escape(c.kind)} · OCC ${escape(c.occ||'—')}</small></td><td>${escape(fmt(c.starts,{hour:'2-digit',minute:'2-digit'}))}–${escape(fmt(c.ends,{hour:'2-digit',minute:'2-digit'}))}</td><td>${escape(c.room||'Not specified')}</td><td>${escape(c.status)}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -74,14 +78,18 @@ function showPreview(result,fmt){
 }
 export function bindSemester(state,{api,load,render,toast,fmt,dateKey}){
  const form=document.querySelector('#semester-form');if(!form)return;
+ document.querySelector('#reload-semester')?.addEventListener('click',()=>{deleteDraft('semester:'+route);resetSemesterDraft();render();});
+ document.querySelector('#reapply-semester')?.addEventListener('click',()=>{capture();const latest=state.semesters.find(s=>s.id===draft.id);if(!latest)return;draft.revision=latest.revision;clearPreview();remember();render();});
  form.addEventListener('input',()=>{capture();clearPreview();});
  form.addEventListener('submit',async event=>{
-  event.preventDefault();capture();clearPreview();document.querySelector('#semester-error').textContent='';
-  const button=event.submitter||form.querySelector('[type="submit"]'),version=editVersion,currentRoute=location.hash;button.disabled=true;
-  try{const result=await api('semester-preview',{definition:definition()});if(version===editVersion&&currentRoute===location.hash){preview=result;showPreview(preview,fmt);}}catch(e){error(e);}finally{button.disabled=false;}
+  event.preventDefault();if(saving)return;capture();clearPreview();document.querySelector('#semester-error').textContent='';
+  const button=event.submitter||form.querySelector('[type="submit"]'),version=editVersion,currentRoute=location.hash;button.disabled=true;button.textContent='Preparing preview…';document.querySelector('#semester-message').textContent='Checking your proposed classes…';
+  try{const result=await api('semester-preview',{definition:definition()});if(version===editVersion&&currentRoute===location.hash){preview=result;showPreview(preview,fmt);}}catch(e){error(e);if(e.status===409)await load();}finally{button.disabled=false;button.textContent='Preview changes';}
  });
- document.querySelector('#add-weekly-class').onclick=()=>{capture();draft.series.push(row());preview=null;render();};
- document.querySelectorAll('[data-remove-series]').forEach(button=>button.onclick=()=>{capture();draft.series=draft.series.filter(s=>s.id!==button.dataset.removeSeries);preview=null;render();});
+ document.querySelector('#add-weekly-class').onclick=()=>{capture();draft.series.push(row());clearPreview();remember();render();[...document.querySelectorAll('[data-series]')].at(-1)?.querySelector('input')?.focus();};
+ document.querySelectorAll('[data-remove-series]').forEach(button=>button.onclick=()=>{capture();const index=draft.series.findIndex(s=>s.id===button.dataset.removeSeries);(draft.removedRows||=[]).push({index,row:draft.series[index]});draft.series.splice(index,1);clearPreview();remember();render();document.querySelector('#undo-weekly-class')?.focus();});
+ document.querySelector('#undo-weekly-class')?.addEventListener('click',()=>{capture();const removed=draft.removedRows.pop();draft.series.splice(Math.min(removed.index,draft.series.length),0,removed.row);clearPreview();remember();render();[...document.querySelectorAll('[data-series]')].find(e=>e.dataset.series===removed.row.id)?.querySelector('input')?.focus();});
+ document.querySelector('#discard-semester').onclick=()=>{if(confirm('Discard this semester draft? Your saved timetable will stay unchanged.')){deleteDraft('semester:'+route);resetSemesterDraft();render();}};
  document.querySelector('#copy-week').onclick=()=>{
   const value=document.querySelector('#copy-week-date').value;if(!value){error(new Error('Choose a saved week to copy.'));return;}
   const picked=new Date(value+'T00:00:00Z'),monday=+picked-((picked.getUTCDay()+6)%7)*86400000;
@@ -89,23 +97,31 @@ export function bindSemester(state,{api,load,render,toast,fmt,dateKey}){
   if(!classes.length){error(new Error('There are no saved classes in that week.'));return;}
   if(!confirm('Replace the weekly rows with this saved week? You will review them before saving.'))return;
   capture();draft.series=copyWeekRows(classes,state.courses,draft.series,dateKey);
-  preview=null;render();
+  clearPreview();remember();render();
  };
  document.querySelector('#save-semester').onclick=async event=>{
-  if(!preview)return;const approved=preview;event.currentTarget.disabled=true;
-  try{await api('semester-apply',{definition:approved.definition,token:approved.token});draft=null;route=null;preview=null;await load();location.hash='#semester/'+approved.definition.id;toast('Semester saved. Individual edits and cancellations were preserved.');}
-  catch(e){clearPreview();error(e);}
+  if(saving||!preview)return;saving=true;const approved=preview,savedRoute=route;event.currentTarget.disabled=true;event.currentTarget.textContent='Saving semester…';document.querySelector('#semester-fields').disabled=true;document.querySelector('#semester-message').textContent='Saving your semester…';
+  try{
+   await api('semester-apply',{definition:approved.definition,token:approved.token});deleteDraft('semester:'+savedRoute);
+   if(route===savedRoute){draft=edit({...approved.definition,revision:approved.definition.revision+1});preview=null;editVersion++;}
+   const refreshed=await load(true);
+   if(location.hash===savedRoute&&route===savedRoute){route='#semester/'+approved.definition.id;location.hash=route;render();}
+   if(refreshed)toast('Semester saved. Individual edits and cancellations were preserved.');
+  }
+  catch(e){if(location.hash===savedRoute&&route===savedRoute){clearPreview();error(e);}if(e.status===409)await load();}
+  finally{saving=false;const fields=document.querySelector('#semester-fields');if(fields){fields.disabled=false;document.querySelector('#semester-message').textContent='';}event.target.textContent='Confirm and save';}
  };
  document.querySelector('#export-semester').onclick=()=>{
   try{capture();const data=definition();const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='better-spectrum-semester.json';a.click();URL.revokeObjectURL(url);}catch(e){error(e);}
  };
  document.querySelector('#import-semester').onchange=async event=>{
-  const file=event.target.files[0];if(!file)return;
+  const file=event.target.files[0];if(!file)return;const currentRoute=location.hash;event.target.disabled=true;document.querySelector('#semester-message').textContent='Reading and checking your schedule…';
   try{
    if(file.size>24000)throw new Error('The schedule file must be smaller than 24 KB.');
    const data=JSON.parse(await file.text());data.revision=state.semesters?.find(s=>s.id===data.id)?.revision||0;
-   const result=await api('semester-preview',{definition:data});draft=edit(result.definition);route='#semester/'+draft.id;location.hash=route;preview=null;render();
+   const result=await api('semester-preview',{definition:data});if(currentRoute!==location.hash)return;draft=edit(result.definition);route='#semester/'+draft.id;location.hash=route;preview=null;remember();render();
    document.querySelector('#semester-message').textContent='Schedule imported for review. Preview and confirm to save it.';
-  }catch(e){error(new Error('Could not import the schedule: '+e.message));}
+  }catch(e){if(currentRoute===location.hash)error(new Error('Could not import the schedule: '+e.message));}
+  finally{event.target.disabled=false;}
  };
 }

@@ -1,3 +1,4 @@
+import {RecordError,updateTask,removeRecord,restoreRecord,removedRecords} from './records.js';
 import {buildPushPayload} from '@block65/webcrypto-web-push';
 import {session,sign,digest,validPush,validDate} from './security.js';
 import {setting,connect,syncCourse,currentCourses} from './moodle.js';
@@ -7,13 +8,13 @@ import {AttendanceError,pairAttendance,acceptAttendanceHandoff,connectAttendance
 const json=(v,status=200,extra={})=>Response.json(v,{status,headers:{'Cache-Control':'no-store',...extra}});
 export function reminderKey(type,item,sub){return `${type}:${item.id}:${item.due||item.starts}:${item.reminder_minutes}:${sub}`;}
 export function reminderDue(item,now){const end=Date.parse(item.due||item.starts);return end>now&&end-item.reminder_minutes*60000<=now;}
-async function queue(env,id,payload,due=new Date().toISOString()){
- const subs=(await env.DB.prepare('SELECT id FROM subscriptions').all()).results;
+async function queue(env,id,payload,due=new Date().toISOString(),deviceId=null){
+ const subs=(await env.DB.prepare('SELECT id FROM subscriptions WHERE ? IS NULL OR id=?').bind(deviceId,deviceId).all()).results;
  for(const s of subs)await env.DB.prepare('INSERT OR IGNORE INTO deliveries (id,subscription_id,payload,due) VALUES (?,?,?,?)').bind(`${id}:${s.id}`,s.id,JSON.stringify(payload),due).run();
 }
-async function deliver(env){
+async function deliver(env,deviceId=null){
  if(!env.VAPID_PRIVATE_KEY||!env.VAPID_PUBLIC_KEY)return;
- const rows=(await env.DB.prepare('SELECT d.*,s.value FROM deliveries d JOIN subscriptions s ON s.id=d.subscription_id WHERE d.sent IS NULL AND d.attempts<5 AND d.due<=? ORDER BY d.due LIMIT 3').bind(new Date().toISOString()).all()).results;
+ const rows=(await env.DB.prepare('SELECT d.*,s.value FROM deliveries d JOIN subscriptions s ON s.id=d.subscription_id WHERE d.sent IS NULL AND d.attempts<5 AND d.due<=? AND (? IS NULL OR d.subscription_id=?) ORDER BY d.due LIMIT 3').bind(new Date().toISOString(),deviceId,deviceId).all()).results;
  for(const d of rows){
   const lockKey=`delivery-lock:${d.id}`;
   const claimed=await env.DB.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(settings.value AS INTEGER)<? RETURNING key').bind(lockKey,String(Date.now()+90000),Date.now()).first();
@@ -67,7 +68,7 @@ async function api(request,env,url){
   const [tasks,classes,updates,subs]=await Promise.all(["SELECT t.* FROM tasks t WHERE source<>'SPeCTRUM' OR EXISTS (SELECT 1 FROM content_scopes s WHERE s.id='module:'||substr(t.id,8) AND s.allowed=1) ORDER BY due",'SELECT c.*,o.semester_id FROM classes c LEFT JOIN class_occurrences o ON o.class_id=c.id ORDER BY julianday(c.starts)','SELECT u.* FROM updates u LEFT JOIN update_scopes us ON us.update_id=u.id LEFT JOIN content_scopes s ON s.id=us.scope_id LEFT JOIN content_scopes p ON p.id=s.parent_id WHERE us.scope_id IS NULL OR (s.allowed=1 AND (s.parent_id IS NULL OR p.allowed=1)) ORDER BY changed DESC LIMIT 60','SELECT COUNT(*) AS n FROM subscriptions'].map(q=>env.DB.prepare(q).all()));
   const partial=(await env.DB.prepare("SELECT key,value FROM settings WHERE key LIKE 'partial:%'").all()).results;
   const semesters=(await env.DB.prepare('SELECT * FROM semesters ORDER BY id').all()).results.map(s=>({...JSON.parse(s.definition),revision:s.revision}));
-  return json({courses:await currentCourses(env.DB),tasks:tasks.results,classes:classes.results,updates:updates.results,semesters,attendance:await attendanceState(env),release:env.APP_RELEASE||'development',subscriptions:subs.results[0].n,pushKey:env.VAPID_PUBLIC_KEY||null,pushReady:!!env.VAPID_PRIVATE_KEY,connection:await setting(env.DB,'connection')||'Not connected · imported records only',lastSync:await setting(env.DB,'last_sync'),lastTick:await setting(env.DB,'last_tick'),partial});
+  return json({courses:await currentCourses(env.DB),tasks:tasks.results,classes:classes.results,updates:updates.results,semesters,removed:await removedRecords(env.DB,semesters),connected:!!await setting(env.DB,'moodle_token'),attendance:await attendanceState(env),release:env.APP_RELEASE||'development',subscriptions:subs.results[0].n,pushKey:env.VAPID_PUBLIC_KEY||null,pushReady:!!env.VAPID_PRIVATE_KEY,connection:await setting(env.DB,'connection')||'Not connected · imported records only',lastSync:await setting(env.DB,'last_sync'),lastTick:await setting(env.DB,'last_tick'),partial});
  }
  if(request.method!=='POST')return json({error:'Not found'},404);
  switch(url.pathname){
@@ -100,7 +101,9 @@ async function api(request,env,url){
   const t=await env.DB.prepare('SELECT source FROM tasks WHERE id=?').bind(data.id).first();if(!t||t.source!=='manual')return json({error:'SPeCTRUM submission status must be confirmed by SPeCTRUM.'},400);
   await env.DB.prepare('UPDATE tasks SET status=? WHERE id=?').bind(data.done?'done':'pending',data.id).run();if(data.done)await env.DB.prepare("DELETE FROM deliveries WHERE sent IS NULL AND id LIKE ?").bind(`task:${data.id}:%`).run();return json({ok:true});
  }
- case '/api/task-delete':{const t=await env.DB.prepare('SELECT source FROM tasks WHERE id=?').bind(data.id).first();if(t?.source==='manual'){await env.DB.prepare('DELETE FROM tasks WHERE id=?').bind(data.id).run();await env.DB.prepare('DELETE FROM deliveries WHERE sent IS NULL AND id LIKE ?').bind(`task:${data.id}:%`).run();}return json({ok:true});}
+ case '/api/task-update':return json(await updateTask(env.DB,data));
+ case '/api/task-delete':return json(await removeRecord(env.DB,'task',data.id));
+ case '/api/restore':return json(await restoreRecord(env.DB,data.type,data.id));
  case '/api/classes':{
   if(!data.course||!validDate(data.starts)||!validDate(data.ends)||Date.parse(data.ends)<=Date.parse(data.starts))return json({error:'Choose a course and an end time after the start time.'},400);
   const id=data.id||crypto.randomUUID();await env.DB.batch([
@@ -109,12 +112,22 @@ async function api(request,env,url){
    env.DB.prepare("DELETE FROM deliveries WHERE sent IS NULL AND substr(id,1,length(?)+7)='class:'||?||':'").bind(id,id)
   ]);return json({ok:true});
  }
- case '/api/class-delete':await env.DB.batch([env.DB.prepare('UPDATE class_occurrences SET overridden=1,cancelled=1 WHERE class_id=?').bind(data.id),env.DB.prepare('DELETE FROM classes WHERE id=?').bind(data.id),env.DB.prepare("DELETE FROM deliveries WHERE sent IS NULL AND substr(id,1,length(?)+7)='class:'||?||':'").bind(data.id,data.id)]);return json({ok:true});
+ case '/api/class-delete':return json(await removeRecord(env.DB,'class',data.id));
  case '/api/seen':await env.DB.prepare('UPDATE updates SET seen=1 WHERE id=?').bind(data.id).run();return json({ok:true});
  case '/api/subscribe':if(!validPush(data))return json({error:'Unsupported push subscription'},400);await env.DB.prepare('INSERT OR REPLACE INTO subscriptions VALUES (?,?)').bind(await digest(data.endpoint),JSON.stringify(data)).run();return json({ok:true});
  case '/api/unsubscribe':await env.DB.prepare('DELETE FROM subscriptions WHERE id=?').bind(await digest(String(data.endpoint))).run();return json({ok:true});
- case '/api/push-test':if(!(await env.DB.prepare('SELECT id FROM subscriptions LIMIT 1').first()))return json({error:'Enable notifications on this device first.'},400);await queue(env,`test:${crypto.randomUUID()}`,{title:'Your planner is working',body:'This notification was sent by your cloud reminder service.',url:'/#settings'},new Date(Date.now()+(data.delayed?120000:0)).toISOString());if(!data.delayed)await deliver(env);return json({ok:true,message:data.delayed?'Test queued for two minutes from now. You can close the app and switch off your laptop.':'Push request processed. Check your device and delivery status.'});
- case '/api/deliveries':return json((await env.DB.prepare('SELECT id,sent,attempts,error,due FROM deliveries ORDER BY due DESC LIMIT 10').all()).results);
+ case '/api/push-status':
+ case '/api/push-test':
+ case '/api/deliveries':{
+  if(typeof data.endpoint!=='string'||!data.endpoint||data.endpoint.length>2048)return json({error:'Check notification setup on this device first.'},400);
+  const id=await digest(data.endpoint),sub=await env.DB.prepare('SELECT id FROM subscriptions WHERE id=?').bind(id).first();
+  if(url.pathname==='/api/push-status')return json({subscribed:!!sub});
+  if(!sub)return json({error:'Enable notifications on this device first.'},400);
+  if(url.pathname==='/api/deliveries')return json((await env.DB.prepare('SELECT id,sent,attempts,error,due FROM deliveries WHERE subscription_id=? ORDER BY due DESC LIMIT 10').bind(id).all()).results);
+  await queue(env,`test:${crypto.randomUUID()}`,{title:'Your planner is working',body:'This test was sent only to this device by your cloud reminder service.',url:'/#settings/notifications'},new Date(Date.now()+(data.delayed?120000:0)).toISOString(),id);
+  if(!data.delayed)await deliver(env,id);
+  return json({ok:true,message:data.delayed?'Test queued for this device in two minutes. Close the app, then check this device.':'Test request processed for this device. Check its notifications and delivery details.'});
+ }
  case '/api/connect':{const courses=await connect(env,data.token);await setAttendanceEnabled(env,false);await env.DB.prepare("DELETE FROM settings WHERE key IN ('attendance_cookie','attendance_connection','attendance_mobile','attendance_pair')").run();return json({ok:true,courses});}
  case '/api/sync':{const events=await syncCourse(env,0);for(const e of events||[])await queue(env,e.id,{title:e.title,body:e.body.slice(0,160),url:'/#updates',scope:e.scope});return json({ok:true});}
  case '/api/disconnect':await setAttendanceEnabled(env,false);await env.DB.prepare("DELETE FROM settings WHERE key IN ('moodle_token','connection','courses','attendance_cookie','attendance_connection','attendance_mobile','attendance_pair')").run();return json({ok:true});
@@ -124,7 +137,7 @@ async function api(request,env,url){
 export default {
  async fetch(request,env){
   const url=new URL(request.url);let response;
-  try{response=url.pathname.startsWith('/api/')?await api(request,env,url):await env.ASSETS.fetch(request);}catch(e){response=json({error:e instanceof AttendanceError||e.message.startsWith('SPeCTRUM')?e.message:'The request could not be completed. Please try again.'},e instanceof AttendanceError?400:500);}
+  try{response=url.pathname.startsWith('/api/')?await api(request,env,url):await env.ASSETS.fetch(request);}catch(e){response=json({error:e instanceof AttendanceError||e instanceof RecordError||e.message.startsWith('SPeCTRUM')?e.message:'The request could not be completed. Please try again.'},e instanceof RecordError?e.status:e instanceof AttendanceError?400:500);}
   const h=new Headers(response.headers);h.set('X-Content-Type-Options','nosniff');h.set('Referrer-Policy','no-referrer');h.set('X-Frame-Options','DENY');h.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
   return new Response(response.body,{status:response.status,headers:h});
  },
