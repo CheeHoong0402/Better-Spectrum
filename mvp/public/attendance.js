@@ -1,6 +1,6 @@
 export function attendanceSwitch(state){
  const a=state.attendance||{};
- return `<label class="settings-row attendance-toggle"><span>Auto-mark attendance</span><input id="attendance-enabled" type="checkbox" role="switch" ${a.enabled?'checked':''} ${!a.connected?'disabled':''} aria-describedby="attendance-help"></label><p class="subtle attendance-help" id="attendance-help">${a.connected?'Uses your saved timetable.': '<a href="#settings/connection">Connect attendance to enable.</a>'}</p>`;
+ return `<label class="settings-row attendance-toggle"><span>Auto-mark attendance</span><input id="attendance-enabled" type="checkbox" role="switch" ${a.enabled?'checked':''} ${!a.connected?'disabled aria-describedby="attendance-help"':''}></label>${!a.connected?'<p class="subtle attendance-help" id="attendance-help"><a href="#settings/connection">Connect attendance to enable.</a></p>':''}`;
 }
 export function attendanceConnection(state,{esc}){
  const a=state.attendance||{};
@@ -17,11 +17,10 @@ export function attendanceConnection(state,{esc}){
 }
 export function attendancePanel(state,{esc,day,time,dateKey,external}){
  const a=state.attendance||{sessions:[]};
- return `<section class="attendance-settings"><h2>Attendance</h2>
+ return `<section class="attendance-settings"><h2>Today & tomorrow</h2>
  ${a.error?`<p class="notice" role="status">${esc(a.error)}</p>`:''}
  ${!a.connected?'<p><a href="#settings/connection">Connect attendance →</a></p>':''}
  <form id="attendance-check" class="attendance-check"><label>Course<select name="courseId" required><option value="">Choose a course</option>${state.courses.filter(c=>c.id!=null&&c.code!=='WIX1003').map(c=>`<option value="${esc(c.id)}">${esc(c.code)}</option>`).join('')}</select></label><button ${!a.connected?'disabled':''}>Check sessions</button></form>
- <h3>Today & tomorrow</h3>
  ${a.sessions.length?[...a.sessions].sort((x,y)=>x.day.localeCompare(y.day)).map(s=>{
   const classes=state.classes.filter(c=>c.course===s.course&&dateKey(c.starts)===s.day&&Date.parse(c.ends)>Date.now());
   const skipped=s.message==='Skipped by you',canSkip=a.enabled&&s.day===dateKey(new Date())&&!s.recorded&&!s.manual&&!s.attempted&&!skipped&&s.course!=='WIX1003'&&classes.length;

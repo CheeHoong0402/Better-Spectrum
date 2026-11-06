@@ -139,6 +139,12 @@ test('actions show progress, reject repeated work visibly, and retain errors wit
  assert.equal(a.node('#action-status').children.at(-1).textContent,'Try again');
 });
 
+test('switch progress stays outside its label and the control unlocks after saving',async()=>{
+ const a=app(),control={id:'notifications-enabled',type:'checkbox',tagName:'INPUT',checked:true,textContent:'',isConnected:true,disabled:false,closest(){return null;},setAttribute(){},removeAttribute(){},get parentElement(){throw Error('Switch labels must not contain progress text.');}};
+ await a.run('action')(async()=>{assert.equal(control.disabled,true);assert.equal(control.checked,true);},control,'Updating notifications…');
+ assert.equal(control.disabled,false);assert.equal(control.checked,true);assert.equal(a.node('#action-status').textContent,'Done.');
+});
+
 test('semester context uses dates rather than IDs and disconnected status preserves historical sync time',()=>{
  const a=app();a.run(`bind=()=>{};render=renderViews;state=${JSON.stringify({...empty(),semesters:[{id:'z-past',name:'Past',start:'1900-01-01',end:'1900-12-31'},{id:'a-current',name:'Current',start:'2020-01-01',end:'2090-12-31'}],connected:false,connection:'Connected',lastSync:'2026-11-05T00:00:00Z'})};render();`);
  assert.equal(a.node('#semester-label').textContent,'Current');assert.match(a.node('#connection-strip').innerHTML,/Disconnected/);assert.match(a.node('#connection-strip').innerHTML,/Last successful course check/);
@@ -170,7 +176,7 @@ test('empty states distinguish filters, completion, disconnected setup and first
  a.run("filter='all';taskFilter='completed';state.tasks=[{course:'A',status:'pending'}];");assert.match(a.run('tasks()'),/No completed deadlines/);
 });
 
-test('Updates groups materials, announcements and deadlines while preserving course filters and unread actions',()=>{
+test('Updates displays one category at a time and combines category and course filters',()=>{
  const a=app(),updates=[
   {id:'deadline',course:'A',kind:'deadline',title:'Assignment due',body:'Due tomorrow',seen:0},
   {id:'material',course:'A',kind:'material',title:'Lecture notes',body:'Open SPeCTRUM to view the latest version.',seen:1},
@@ -178,13 +184,15 @@ test('Updates groups materials, announcements and deadlines while preserving cou
   {id:'older-material',course:'A',kind:null,title:'Older update',seen:1},
  ].map(u=>({...u,changed:'2026-11-06T02:00:00Z'}));
  a.run(`state=${JSON.stringify({...empty(),courses:[{code:'A'},{code:'B'}],updates})};`);
- const view=a.run('updates()');
- assert.ok(view.indexOf('<h2>Materials</h2>')<view.indexOf('Lecture notes'));
- assert.ok(view.indexOf('Older update')<view.indexOf('<h2>Announcements</h2>'));
- assert.ok(view.indexOf('Room change')<view.indexOf('<h2>Deadlines</h2>'));
- assert.match(view,/data-seen="deadline"/);assert.doesNotMatch(view,/data-seen="material"/);
- assert.match(view,/&lt;script&gt;Private text&lt;\/script&gt;/);assert.doesNotMatch(view,/<script>|Open SPeCTRUM to view the latest version/);
+ const materials=a.run('updates()');
+ assert.match(materials,/Lecture notes|Older update/);assert.doesNotMatch(materials,/Room change|Assignment due/);
+ assert.match(materials,/data-update-filter="material" aria-pressed="true"/);
+ assert.doesNotMatch(materials,/data-seen="material"|Open SPeCTRUM to view the latest version/);
+ a.run("updateFilter='announcement'");const announcements=a.run('updates()');
+ assert.match(announcements,/Room change|data-seen="announcement"/);assert.doesNotMatch(announcements,/Lecture notes|Assignment due|<script>/);
+ assert.match(announcements,/&lt;script&gt;Private text&lt;\/script&gt;/);
  a.run("filter='A'");const filtered=a.run('updates()');
- assert.match(filtered,/Lecture notes|Assignment due/);assert.doesNotMatch(filtered,/Announcements|Room change/);
+ assert.match(filtered,/No announcements for this course/);assert.doesNotMatch(filtered,/Room change|Lecture notes/);
+ a.run("updateFilter='deadline'");assert.match(a.run('updates()'),/Assignment due|data-seen="deadline"/);
  a.run("filter='C'");assert.match(a.run('updates()'),/Clear filter/);
 });
