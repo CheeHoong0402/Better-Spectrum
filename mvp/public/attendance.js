@@ -1,6 +1,6 @@
-export function attendanceSwitch(state){
+export function attendanceSwitch(state,icon){
  const a=state.attendance||{};
- return `<label class="settings-row attendance-toggle"><span>Auto-mark attendance</span><input id="attendance-enabled" type="checkbox" role="switch" ${a.enabled?'checked':''} ${!a.connected?'disabled aria-describedby="attendance-help"':''}></label>${!a.connected?'<p class="subtle attendance-help" id="attendance-help"><a href="#settings/connection">Connect attendance to enable.</a></p>':''}`;
+ return `<label class="settings-row attendance-toggle">${icon('calendar')}<span>Auto-mark attendance</span><input id="attendance-enabled" type="checkbox" role="switch" ${a.enabled?'checked':''} ${!a.connected?'disabled aria-describedby="attendance-help"':''}></label>${!a.connected?'<p class="subtle attendance-help" id="attendance-help"><a href="#settings/connection">Connect attendance to enable.</a></p>':''}`;
 }
 export function attendanceConnection(state,{esc}){
  const a=state.attendance||{};
@@ -15,21 +15,6 @@ export function attendanceConnection(state,{esc}){
  ${a.connected?'<button class="quiet" id="attendance-disconnect">Disconnect attendance</button>':''}
  </details></section>`;
 }
-export function attendancePanel(state,{esc,day,time,dateKey,external}){
- const a=state.attendance||{sessions:[]};
- return `<section class="attendance-settings"><h2>Today & tomorrow</h2>
- ${a.error?`<p class="notice" role="status">${esc(a.error)}</p>`:''}
- ${!a.connected?'<p><a href="#settings/connection">Connect attendance →</a></p>':''}
- <form id="attendance-check" class="attendance-check"><label>Course<select name="courseId" required><option value="">Choose a course</option>${state.courses.filter(c=>c.id!=null&&c.code!=='WIX1003').map(c=>`<option value="${esc(c.id)}">${esc(c.code)}</option>`).join('')}</select></label><button ${!a.connected?'disabled':''}>Check sessions</button></form>
- ${a.sessions.length?[...a.sessions].sort((x,y)=>x.day.localeCompare(y.day)).map(s=>{
-  const classes=state.classes.filter(c=>c.course===s.course&&dateKey(c.starts)===s.day&&Date.parse(c.ends)>Date.now());
-  const skipped=s.message==='Skipped by you',canSkip=a.enabled&&s.day===dateKey(new Date())&&!s.recorded&&!s.manual&&!s.attempted&&!skipped&&s.course!=='WIX1003'&&classes.length;
-  const message=s.recorded?'Verified in SPeCTRUM':s.message;
-  return `<article class="task attendance-session"><div class="task-meta"><strong>${esc(s.course)}</strong><span>${s.recorded?esc(s.recorded):s.manual?'Manual marking':skipped?'Skipped':s.confirmed_class?'Scheduled automatically':s.attempted?'Needs a manual check':s.session_id?'Open':'Waiting to open'}</span></div><h4>${s.day===dateKey(new Date())?'Today':esc(day(s.day+'T12:00:00+08:00'))} · ${esc(s.name)}</h4><p>${esc(s.label)}</p>${message?`<p class="subtle">${esc(message)}</p>`:''}
-   <div class="task-actions">${external(`https://spectrum.um.edu.my/mod/attendance/view.php?id=${s.cmid}`,'Open attendance')}${canSkip?`<button data-attendance-cancel="${esc(s.id)}" class="quiet">Skip this session</button>`:''}</div></article>`;
- }).join(''):'<p class="empty">No sessions found.</p>'}
- </section>`;
-}
 export function bindAttendance({api,load,action,toast}){
  document.querySelector('#attendance-qr')?.addEventListener('submit',e=>{e.preventDefault();const f=e.target,file=f.elements.qr.files[0];action(async()=>{const status=document.querySelector('#attendance-qr-status');status.textContent='Reading QR image…';try{const url=await readAttendanceQr(file);status.textContent='Connecting…';await api('attendance-qr',{url});await load();toast(`Attendance connected. Auto-marking is off.`);}catch(error){status.textContent=error.message;throw error;}finally{f.reset();}});});
  document.querySelector('#attendance-pair')?.addEventListener('click',()=>action(async()=>{const r=await api('attendance-pair',{});const box=document.querySelector('#attendance-pair-code');box.replaceChildren();const input=document.createElement('input');input.readOnly=true;input.value=r.code;input.setAttribute('aria-label','Pairing code for Windows helper');box.append(input);const p=document.createElement('p');p.textContent='Paste into the Windows helper. Expires in 10 minutes; keep private.';box.append(p);input.select();}));
@@ -37,8 +22,6 @@ export function bindAttendance({api,load,action,toast}){
  document.querySelector('#attendance-enabled')?.addEventListener('change',e=>action(async()=>{const enabled=e.target.checked;e.target.disabled=true;try{await api('attendance-enabled',{enabled});toast(enabled?'Auto-marking on.':'Auto-marking off.');}finally{await load();}}));
  document.querySelector('#attendance-login')?.addEventListener('submit',e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));e.target.elements.password.value='';action(async()=>{try{await api('attendance-connect',data);toast('Attendance connected. You can now enable auto-marking.');}finally{await load();}});});
  document.querySelector('#attendance-disconnect')?.addEventListener('click',()=>action(async()=>{await api('attendance-disconnect',{});await load();}));
- document.querySelector('#attendance-check')?.addEventListener('submit',e=>{e.preventDefault();const courseId=new FormData(e.target).get('courseId');action(async()=>{await api('attendance-refresh',{courseId:Number(courseId)});await load();toast('Attendance sessions checked.');});});
- document.querySelectorAll('[data-attendance-cancel]').forEach(b=>b.addEventListener('click',()=>action(async()=>{await api('attendance-cancel',{id:b.dataset.attendanceCancel});await load();})));
 }
 
 

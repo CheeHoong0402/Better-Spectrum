@@ -207,7 +207,7 @@ export async function refreshAttendance(env,courseid,notify){
   for(const row of rows){const date=sessionDate(row.label),groups=groupNumbers(row.description,true);if(!date||date<day||date>until||groups.length&&!groups.some(n=>numbers.includes(n)))continue;
    const id=await digest(`${m.id}:${row.key}`);
    writes.push(env.DB.prepare("INSERT INTO attendance_sessions (id,course,course_id,cmid,name,row_key,day,label,session_id,recorded,manual,checked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET session_id=CASE WHEN attendance_sessions.attempted IS NOT NULL THEN attendance_sessions.session_id ELSE excluded.session_id END,recorded=excluded.recorded,manual=excluded.manual,checked=excluded.checked,message=CASE WHEN excluded.recorded<>'' THEN 'Verified in SPeCTRUM' ELSE attendance_sessions.message END").bind(id,course.code,course.id,m.id,text(m.name),row.key,date,row.label,row.session,row.status,row.password?1:0,new Date().toISOString()));
-   if(notify&&row.open&&!row.status)await notify(`attendance-open:${id}`,{title:`${course.code} · attendance is open`,body:`${row.label}. Auto-marking follows your saved class times when enabled.`,url:'/#settings/attendance'});
+   if(notify&&row.open&&!row.status)await notify(`attendance-open:${id}`,{title:`${course.code} · attendance is open`,body:`${row.label}. Auto-marking follows your saved class times when enabled.`,url:'/#settings'});
   }
  }
  // Removed or hidden activities must never retain permission to mark.
@@ -222,7 +222,7 @@ export async function refreshAttendance(env,courseid,notify){
 }
 async function recordedAttendance(env,notify,row,status){
  await env.DB.prepare('UPDATE attendance_sessions SET recorded=?,message=? WHERE id=?').bind(status,'Verified in SPeCTRUM',row.id).run();
- await notify(`attendance-result:${row.id}`,{title:`${row.course} · attendance confirmed`,body:`${row.label} · ${status}. Verified in SPeCTRUM.`,url:'/#settings/attendance'});
+ await notify(`attendance-result:${row.id}`,{title:`${row.course} · attendance confirmed`,body:`${row.label} · ${status}. Verified in SPeCTRUM.`,url:'/#settings'});
  await env.DB.prepare('UPDATE attendance_sessions SET notified=1 WHERE id=?').bind(row.id).run();
 }
 export async function setAttendanceEnabled(env,enabled){
@@ -259,7 +259,7 @@ export async function attendanceTick(env,notify,now=Date.now()){
  if(!rows.length){
   const upcoming=await env.DB.prepare("SELECT course FROM classes WHERE course<>'WIX1003' AND julianday(starts)<=julianday(?) AND julianday(ends)>julianday(?) ORDER BY starts LIMIT 1").bind(new Date(now+3600000).toISOString(),new Date(now).toISOString()).first();
   const course=upcoming&&(await currentCourses(env.DB)).find(c=>c.code===upcoming.course);
-  if(course)try{await refreshAttendance(env,course.id,notify);await scheduleAttendance(env,now);rows=await pending();}catch(e){const message=e instanceof AttendanceError?e.message:'Attendance discovery failed. Check SPeCTRUM manually.';await setting(env.DB,'attendance_error',message);await notify(`attendance-discovery:${course.id}:${new Date(now).toISOString().slice(0,10)}`,{title:`${course.code} · check attendance manually`,body:message,url:'/#settings/attendance'});}
+  if(course)try{await refreshAttendance(env,course.id,notify);await scheduleAttendance(env,now);rows=await pending();}catch(e){const message=e instanceof AttendanceError?e.message:'Attendance discovery failed. Check SPeCTRUM manually.';await setting(env.DB,'attendance_error',message);await notify(`attendance-discovery:${course.id}:${new Date(now).toISOString().slice(0,10)}`,{title:`${course.code} · check attendance manually`,body:message,url:'/#settings'});}
  }
  for(const a of rows){
   const c=await env.DB.prepare('SELECT * FROM classes WHERE id=?').bind(a.confirmed_class).first();
@@ -298,7 +298,7 @@ export async function attendanceTick(env,notify,now=Date.now()){
    if((await env.DB.prepare('SELECT recorded FROM attendance_sessions WHERE id=?').bind(a.id).first())?.recorded)continue;
    const message=e instanceof AttendanceError?e.message:'SPeCTRUM could not be checked. Open attendance manually.';
    await env.DB.prepare('UPDATE attendance_sessions SET message=?,confirmed_class=NULL WHERE id=?').bind(message,a.id).run();
-   await notify(`attendance-attention:${a.id}`,{title:`${a.course} · attendance needs you`,body:message,url:'/#settings/attendance'});
+   await notify(`attendance-attention:${a.id}`,{title:`${a.course} · attendance needs you`,body:message,url:'/#settings'});
   }finally{await env.DB.prepare("DELETE FROM settings WHERE key='attendance_lock'").run();}
  }
 }
