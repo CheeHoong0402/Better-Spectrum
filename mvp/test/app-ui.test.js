@@ -186,13 +186,15 @@ test('Updates displays one category at a time and combines category and course f
  a.run(`state=${JSON.stringify({...empty(),courses:[{code:'A'},{code:'B'}],updates})};`);
  const materials=a.run('updates()');
  assert.match(materials,/Lecture notes|Older update/);assert.doesNotMatch(materials,/Room change|Assignment due/);
- assert.match(materials,/data-update-filter="material" aria-pressed="true"/);
+ assert.match(materials,/<select id="update-filter"><option value="material" selected>Materials<\/option>/);
+ assert.doesNotMatch(materials,/data-update-filter|update-filters/);
  assert.doesNotMatch(materials,/data-seen="material"|Open SPeCTRUM to view the latest version/);
- a.run("updateFilter='announcement'");const announcements=a.run('updates()');
+ a.run('bind()');a.node('#update-filter').events.change({target:{value:'announcement'}});const announcements=a.run('updates()');
+ assert.match(announcements,/<option value="announcement" selected>Announcements<\/option>/);
  assert.match(announcements,/Room change|data-seen="announcement"/);assert.doesNotMatch(announcements,/Lecture notes|Assignment due|<script>/);
  assert.match(announcements,/&lt;script&gt;Private text&lt;\/script&gt;/);
  a.run("filter='A'");const filtered=a.run('updates()');
  assert.match(filtered,/No announcements for this course/);assert.doesNotMatch(filtered,/Room change|Lecture notes/);
- a.run("updateFilter='deadline'");assert.match(a.run('updates()'),/Assignment due|data-seen="deadline"/);
+ a.node('#update-filter').events.change({target:{value:'deadline'}});assert.match(a.run('updates()'),/Assignment due|data-seen="deadline"/);
  a.run("filter='C'");assert.match(a.run('updates()'),/Clear filter/);
 });

@@ -92,5 +92,3 @@ body:has(.timetable-page) #details .detail-actions{display:grid;grid-template-co
 .settings-row.attendance-toggle{margin:0}.settings-row.attendance-toggle>span{flex:1}.attendance-help{margin:0 4px 12px;color:var(--muted);font-size:13px}.settings-detail-content>.attendance-settings:first-child{margin-top:0;padding-top:0;border:0}.update-group+.update-group{margin-top:24px}
 
 #device-push+details summary{min-height:44px;display:flex;align-items:center;cursor:pointer}
-
-.update-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 24px}.update-filters button{min-height:44px;padding:10px 8px;font-size:14px;overflow-wrap:anywhere}.update-filters button[aria-pressed="true"]{background:var(--accent);border-color:var(--green);color:var(--green);font-weight:600}

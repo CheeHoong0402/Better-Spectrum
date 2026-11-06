@@ -79,13 +79,13 @@ function tasks(){const rows=state.tasks.filter(t=>(filter==='all'||t.course===fi
 function updates(){
  const rows=state.updates.filter(u=>filter==='all'||u.course===filter);
  const categories=[['material','Materials'],['announcement','Announcements'],['deadline','Deadlines']];
- const buttons=categories.map(([kind,title])=>`<button type="button" data-update-filter="${kind}" aria-pressed="${updateFilter===kind}">${title}</button>`).join('');
+ const options=categories.map(([kind,title])=>`<option value="${kind}" ${updateFilter===kind?'selected':''}>${title}</option>`).join('');
  const groups=categories.filter(([kind])=>kind===updateFilter).map(([kind,title])=>{
   const items=rows.filter(u=>(['announcement','deadline'].includes(u.kind)?u.kind:'material')===kind);
   return items.length?`<section class="panel update-group"><div class="panel-heading"><h2>${title}</h2><span class="badge">${items.length}</span></div>${items.map(u=>`<article class="update"><div class="task-meta"><span>${esc(u.course)}</span><span>${esc(day(u.changed))}</span></div><h3>${u.seen?'':'• '}${esc(u.title)}</h3>${u.body&&u.body!=='Open SPeCTRUM to view the latest version.'?`<p>${esc(typeof u.body==='string'?u.body:'')}</p>`:''}${external(u.url,'Open in SPeCTRUM')} ${!u.seen?`<button class="quiet" data-seen="${esc(u.id)}">Mark read</button>`:''}</article>`).join('')}</section>`:'';
  }).join('');
  const empty=rows.length?`<div class="empty"><h2>No ${categories.find(([kind])=>kind===updateFilter)[1].toLowerCase()}${filter==='all'?' yet':' for this course'}</h2></div>`:updatesEmpty();
- return heading('WHAT’S CHANGED','Course updates','')+`<div class="filter-row">${courseSelect()}</div><div class="update-filters" role="group" aria-label="Update category">${buttons}</div>`+(groups||`<section class="panel">${empty}</section>`);
+ return heading('WHAT’S CHANGED','Course updates','')+`<div class="filter-row">${courseSelect()}<label><span>Filter by type</span><select id="update-filter">${options}</select></label></div>`+(groups||`<section class="panel">${empty}</section>`);
 }
 function deadlineEmpty(){
  if(filter!=='all'&&state.tasks.length)return `<div class="empty"><h2>No matching deadlines</h2><p>No deadlines match this course and status.</p><button id="clear-filters">Clear filters</button></div>`;
@@ -135,7 +135,7 @@ function bind(){
  applyTimetableLayout();
  bindNotifications(state,{api,load,action,toast});
  $('#clear-filters')?.addEventListener('click',()=>{filter='all';taskFilter='all';render();});
- document.querySelectorAll('[data-update-filter]').forEach(button=>button.onclick=()=>{updateFilter=button.dataset.updateFilter;render();document.querySelector(`[data-update-filter="${updateFilter}"]`)?.focus();});
+ $('#update-filter')?.addEventListener('change',e=>{updateFilter=e.target.value;render();$('#update-filter')?.focus();});
  $('#show-completed')?.addEventListener('click',()=>{taskFilter='completed';render();});
  $('#show-pending')?.addEventListener('click',()=>{taskFilter='active';render();});
  bindAttendance({api,load,action,toast});
