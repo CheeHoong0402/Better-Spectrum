@@ -169,3 +169,22 @@ test('empty states distinguish filters, completion, disconnected setup and first
  assert.doesNotMatch(a.run('updates()'),/first successful/);
  a.run("filter='all';taskFilter='completed';state.tasks=[{course:'A',status:'pending'}];");assert.match(a.run('tasks()'),/No completed deadlines/);
 });
+
+test('Updates groups materials, announcements and deadlines while preserving course filters and unread actions',()=>{
+ const a=app(),updates=[
+  {id:'deadline',course:'A',kind:'deadline',title:'Assignment due',body:'Due tomorrow',seen:0},
+  {id:'material',course:'A',kind:'material',title:'Lecture notes',body:'Open SPeCTRUM to view the latest version.',seen:1},
+  {id:'announcement',course:'B',kind:'announcement',title:'Room change',body:'<script>Private text</script>',seen:0},
+  {id:'older-material',course:'A',kind:null,title:'Older update',seen:1},
+ ].map(u=>({...u,changed:'2026-11-06T02:00:00Z'}));
+ a.run(`state=${JSON.stringify({...empty(),courses:[{code:'A'},{code:'B'}],updates})};`);
+ const view=a.run('updates()');
+ assert.ok(view.indexOf('<h2>Materials</h2>')<view.indexOf('Lecture notes'));
+ assert.ok(view.indexOf('Older update')<view.indexOf('<h2>Announcements</h2>'));
+ assert.ok(view.indexOf('Room change')<view.indexOf('<h2>Deadlines</h2>'));
+ assert.match(view,/data-seen="deadline"/);assert.doesNotMatch(view,/data-seen="material"/);
+ assert.match(view,/&lt;script&gt;Private text&lt;\/script&gt;/);assert.doesNotMatch(view,/<script>|Open SPeCTRUM to view the latest version/);
+ a.run("filter='A'");const filtered=a.run('updates()');
+ assert.match(filtered,/Lecture notes|Assignment due/);assert.doesNotMatch(filtered,/Announcements|Room change/);
+ a.run("filter='C'");assert.match(a.run('updates()'),/Clear filter/);
+});
