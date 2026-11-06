@@ -43,7 +43,7 @@ export async function removeRecord(db,type,id){
  const statements=[db.prepare(`INSERT OR REPLACE INTO settings (key,value) SELECT ?,json_object('type',?,'item',json_object(${snapshot})) FROM ${name} WHERE ${where}`).bind(trashKey(type,id),type,id)];
  if(type==='class')statements.push(
   db.prepare('UPDATE class_occurrences SET overridden=1,cancelled=1 WHERE class_id=?').bind(id),
-  db.prepare("UPDATE attendance_sessions SET confirmed_class=NULL,message='Class cancelled · confirm again after restoring' WHERE confirmed_class=? AND attempted IS NULL").bind(id)
+  db.prepare("UPDATE attendance_sessions SET confirmed_class=NULL,message='Class cancelled · automatic match cleared' WHERE confirmed_class=? AND attempted IS NULL").bind(id)
  );
  statements.push(db.prepare(`DELETE FROM deliveries WHERE sent IS NULL AND substr(id,1,length(?)+?)=?||?||':' AND EXISTS (SELECT 1 FROM ${name} WHERE ${where})`).bind(id,type.length+2,type+':',id,id),db.prepare(`DELETE FROM ${name} WHERE ${where}`).bind(id));
  await db.batch(statements);return {ok:true};
@@ -62,7 +62,7 @@ export async function restoreRecord(db,type,id){
  if(type==='task'&&item.source!=='manual')throw new RecordError('Only manual deadlines can be restored here.');
  const fields=recordFields[type];
  const statements=[db.prepare(`INSERT INTO ${name} (${fields.join(',')}) VALUES (${fields.map(()=>'?').join(',')}) ON CONFLICT(id) DO NOTHING`).bind(...fields.map(k=>item[k]??null))];
- if(type==='class')statements.push(db.prepare('UPDATE class_occurrences SET overridden=1,cancelled=0 WHERE class_id=?').bind(id),db.prepare("UPDATE attendance_sessions SET confirmed_class=NULL,message='Class restored · confirm attendance again' WHERE confirmed_class=? AND attempted IS NULL").bind(id));
+ if(type==='class')statements.push(db.prepare('UPDATE class_occurrences SET overridden=1,cancelled=0 WHERE class_id=?').bind(id),db.prepare("UPDATE attendance_sessions SET confirmed_class=NULL,message='Class restored · waiting for automatic matching' WHERE confirmed_class=? AND attempted IS NULL").bind(id));
  statements.push(db.prepare('DELETE FROM settings WHERE key=?').bind(trashKey(type,id)));
  await db.batch(statements);return {ok:true};
 }

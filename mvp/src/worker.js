@@ -79,7 +79,7 @@ async function api(request,env,url){
  case '/api/attendance-enabled':await setAttendanceEnabled(env,data.enabled);return json({ok:true});
  case '/api/attendance-refresh':await refreshAttendance(env,data.courseId);return json({ok:true});
  case '/api/attendance-confirm':await confirmAttendance(env,data);return json({ok:true});
- case '/api/attendance-cancel':await env.DB.prepare('UPDATE attendance_sessions SET confirmed_class=NULL,message=? WHERE id=?').bind('Confirmation withdrawn',data.id).run();return json({ok:true});
+ case '/api/attendance-cancel':await env.DB.prepare('UPDATE attendance_sessions SET confirmed_class=NULL,message=? WHERE id=?').bind('Skipped by you',data.id).run();return json({ok:true});
  case '/api/attendance-disconnect':await setAttendanceEnabled(env,false);await env.DB.prepare("DELETE FROM settings WHERE key IN ('attendance_cookie','attendance_connection','attendance_mobile','attendance_pair')").run();return json({ok:true});
  case '/api/semester-preview':
  case '/api/semester-apply':{
