@@ -92,3 +92,24 @@ body:has(.timetable-page) #details .detail-actions{display:grid;grid-template-co
 .settings-row.attendance-toggle{margin:0}.settings-row.attendance-toggle>span{flex:1}.attendance-help{margin:0 4px 12px;color:var(--muted);font-size:13px}.settings-detail-content>.attendance-settings:first-child{margin-top:0;padding-top:0;border:0}.update-group+.update-group{margin-top:24px}
 
 #device-push+details summary{min-height:44px;display:flex;align-items:center;cursor:pointer}
+
+/* Carry the book icon's violet, blue, teal and amber through the planner. */
+:root{--ink:#25243a;--muted:#5e6078;--paper:#f6f5ff;--line:#dddff0;--accent:#e9e2ff;--green:#6340c9;--danger:#b4233c;--violet:#6340c9;--violet-soft:#eee7ff;--blue:#245bb4;--blue-soft:#e4efff;--teal:#086f65;--teal-soft:#def5ee;--amber:#8b4a0d;--amber-soft:#fff0d6;--rose:#a72c65;--rose-soft:#fce5f0}
+body{background:linear-gradient(135deg,var(--violet-soft),var(--paper) 45%,var(--blue-soft));min-height:100dvh}
+button:hover{background:var(--violet-soft)}.primary:hover{background:#4e2fa8}
+.sidebar{background:#efedfb}.sidebar nav a[href="#today"]{--nav-ink:var(--blue);--nav-fill:var(--blue-soft)}.sidebar nav a[href="#timetable"]{--nav-ink:var(--teal);--nav-fill:var(--teal-soft)}.sidebar nav a[href="#tasks"]{--nav-ink:var(--amber);--nav-fill:var(--amber-soft)}.sidebar nav a[href="#updates"]{--nav-ink:var(--rose);--nav-fill:var(--rose-soft)}.sidebar nav a[href="#settings"]{--nav-ink:var(--violet);--nav-fill:var(--violet-soft)}
+.sidebar nav a svg{color:var(--nav-ink)}.sidebar nav a:hover,.sidebar nav a.active{background:var(--nav-fill);color:var(--nav-ink)}.sidebar nav a.active{box-shadow:inset 0 0 0 1px currentColor}
+.brand>div,.heading-row h1,.settings-header h1{color:var(--violet)}.avatar,.pill{background:var(--violet-soft);color:var(--violet)}
+.panel{box-shadow:0 3px 18px #35307208}.badge,.tag{background:var(--violet-soft);color:var(--violet);border-color:var(--line)}.notice{background:var(--amber-soft);color:var(--amber)}
+.agenda-heading h1{color:var(--blue)}.date-dot{background:var(--rose)}.date-choice.selected{background:var(--blue);color:var(--white)}.date-choice:not(.selected):hover{background:var(--blue-soft);color:var(--blue)}.add-circle{background:var(--violet);color:var(--white)}.add-circle:hover{background:#4e2fa8}
+.agenda-summary a{border:0;border-radius:18px;padding:16px;margin-bottom:10px;background:var(--amber-soft);color:var(--amber)}.agenda-summary a+a{background:var(--rose-soft);color:var(--rose)}.agenda-summary strong{color:inherit}
+.agenda-aside .panel{background:var(--amber-soft)}.agenda-aside .panel h2{color:var(--amber)}.agenda-empty{background:var(--blue-soft);border-radius:24px}.empty-circle{background:var(--white);border-color:var(--blue);color:var(--blue)}
+#view:has(#task-filter)>.heading-row h1{color:var(--amber)}#view:has(#task-filter)>.panel{background:#fff9ef}.update-group{background:#f4eeff}.update-group h2{color:var(--violet)}
+.reminder-link{color:var(--teal)}.detail-facts{background:var(--blue-soft)}.detail-actions>*{background:var(--violet-soft)}
+main:has(.settings-page){background:transparent}.settings-page{color:var(--ink)}.settings-group{margin-top:18px;padding:8px 18px;border:0;border-radius:24px;background:var(--white)}.settings-group:nth-of-type(2){background:var(--teal-soft)}.settings-bottom{background:transparent}.settings-row:hover{background:var(--violet-soft)}.settings-version,.settings-chevron{color:var(--muted)}
+.settings-detail-content .panel{padding:24px;border-radius:24px;background:var(--white)}.settings-header>a{color:var(--violet);background:var(--violet-soft)}
+.timetable-page{--schedule-muted:var(--muted);--schedule-line:var(--line);--schedule-surface:#ffffff}.schedule-title h1{color:var(--teal)}.semester-week{background:var(--amber-soft);color:var(--amber);border-color:#e8c48b}.semester-week>span{color:inherit}
+.schedule-day{background:var(--teal-soft)}.schedule-day[aria-pressed=true]{background:var(--teal);border-color:var(--teal);box-shadow:none}.schedule-day.is-today>span{color:var(--teal)}.schedule-day[aria-pressed=true]>span{color:var(--white)}.schedule-column.is-today{background-color:#effaf6}.schedule-column.is-selected{background-color:#e4f5ef}
+.schedule-agenda{background:#effaf6}.schedule-agenda h2{color:var(--teal)}.schedule-agenda .panel-heading>span{background:var(--teal-soft);color:var(--teal)}.schedule-manage .semester-button{background:var(--violet-soft);color:var(--violet)}
+.semester-editor .panel{background:#effaf6}.semester-editor .panel h2{color:var(--teal)}.login{background:var(--white);border-radius:28px;box-shadow:0 16px 60px #6340c914}
+@media(max-width:700px){.sidebar{background:#fefcff;border-color:var(--line);box-shadow:0 4px 24px #6340c914}.agenda-summary a{margin-bottom:0}.settings-group{padding:8px 14px}.settings-detail-content .panel{padding:20px}}
