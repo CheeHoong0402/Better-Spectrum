@@ -1,3 +1,4 @@
+import {plainText,courseLabel,pendingTask,taskGroup,orderedTasks} from './presentation.js';
 import {notificationPanel,notificationSwitch,bindNotifications} from './notifications.js';
 import {attendanceSwitch,attendanceConnection,bindAttendance} from './attendance.js';
 import {semesterView,bindSemester,resetSemesterDraft} from './semester.js';
@@ -12,7 +13,7 @@ const day=d=>fmt(d,{weekday:'short',day:'numeric',month:'short'});
 const dateKey=d=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kuala_Lumpur',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(d));return ['year','month','day'].map(k=>p.find(x=>x.type===k).value).join('-');};
 const icon=n=>`<svg aria-hidden="true"><use href="#${n}"/></svg>`;
 function color(code){return state.courses.find(c=>c.code===code)?.color||'#4263b5';}
-function label(code){return state.courses.find(c=>c.code===code)?.name||code;}
+function label(code){return courseLabel(code,state.courses.find(c=>c.code===code)?.name||code);}
 function external(url,text){try{const u=new URL(url);return u.protocol==='https:'&&u.hostname==='spectrum.um.edu.my'?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)} ↗</a>`:'';}catch{return '';}}
 function toast(s,undo){$('#toast').textContent=s;if(undo){const button=document.createElement('button');button.textContent='Undo';button.onclick=()=>action(undo,button,'Restoring…',true);$('#toast').append(button);}$('#toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').hidden=true,undo?12000:6500);}
 function removedView(type){const rows=(state.removed||[]).filter(r=>r.type===type);return rows.length?`<details class="panel removed-records"><summary>Removed ${type==='task'?'deadlines':'and cancelled classes'} (${rows.length})</summary>${rows.map(({item})=>`<div class="removed-row"><span>${esc(item.course)} · ${esc(item.title||item.kind)}<small>${esc(day(item.due||item.starts))} · ${time(item.due||item.starts)}</small></span><button data-restore-type="${type}" data-restore-id="${esc(item.id)}">Restore</button></div>`).join('')}</details>`:'';}
@@ -46,9 +47,9 @@ async function load(saved=false){
   return false;
  }finally{retry.disabled=false;}
 }
-function status(t){return t.status==='submitted'?'Submitted':t.status==='done'?'Completed':t.status==='draft'?'Draft · not submitted':t.status==='unknown'?'Submission unverified':Date.parse(t.due)<Date.now()?'Overdue':'Upcoming';}
-const active=t=>!['submitted','done'].includes(t.status);
-function taskCard(t){return `<article class="task"><div class="task-meta"><span><span class="course-dot" data-color="${esc(t.course)}"></span>${esc(t.course)}</span><span class="${status(t)==='Overdue'?'danger':''}">${esc(status(t))}</span></div><div class="task-title">${esc(t.title)}</div><div class="task-meta"><span>${esc(day(t.due))} · ${time(t.due)}</span><span>${esc(t.source)}</span></div><div class="task-actions">${external(t.url,'Open assignment')}${t.source==='manual'?`<button class="quiet" data-edit-task="${esc(t.id)}">Edit</button><button class="quiet" data-complete="${esc(t.id)}">${active(t)?'Mark done':'Reopen'}</button><button class="quiet danger" data-delete-task="${esc(t.id)}">Remove</button>`:''}</div></article>`;}
+function status(t){return t.status==='submitted'?'Submitted':t.status==='done'?'Completed':t.status==='draft'?'Draft · not submitted':t.status==='unknown'?'Submission unverified':taskGroup(t)==='unverified'?'Due date unverified':taskGroup(t)==='overdue'?'Overdue':'Upcoming';}
+const active=pendingTask;
+function taskCard(t){return `<article class="task"><div class="task-meta"><span><span class="course-dot" data-color="${esc(t.course)}"></span>${esc(t.course)}</span><span class="${status(t)==='Overdue'?'danger':''}">${esc(status(t))}</span></div><div class="task-title">${esc(plainText(t.title))}</div><div class="task-meta"><span>${esc(day(t.due))} · ${time(t.due)}</span><span>${esc(t.source)}</span></div><div class="task-actions">${external(t.url,'Open assignment')}${t.source==='manual'?`<button class="quiet" data-edit-task="${esc(t.id)}">Edit</button><button class="quiet" data-complete="${esc(t.id)}">${active(t)?'Mark done':'Reopen'}</button><button class="quiet danger" data-delete-task="${esc(t.id)}">Remove</button>`:''}</div></article>`;}
 function sessionCard(c){return `<article class="session"><div class="time-col">${time(c.starts)}<small>${time(c.ends)}</small></div><div class="session-body" data-border="${esc(c.course)}"><span class="subtle">${esc(c.course)} · ${esc(c.kind)}</span><h3>${esc(label(c.course))}</h3><p>${esc(c.room||'Room not specified')}</p><span class="badge">OCC ${esc(c.occ||'—')}</span></div></article>`;}
 function heading(title,action=''){return `<div class="heading-row"><h1>${title}</h1>${action}</div>`;}
 function today(){
@@ -66,7 +67,7 @@ function today(){
 }
 function showDetail(type,id){
  const item=(type==='class'?state.classes:state.tasks).find(i=>i.id===id);if(!item)return;
- const d=$('#details');$('#detail-content').innerHTML=`<p class="eyebrow">${esc(type==='class'?item.course+' · '+item.kind:status(item))}</p><h2>${esc(type==='class'?label(item.course):item.title)}</h2><p class="detail-date">${esc(day(type==='class'?item.starts:item.due))} · ${time(type==='class'?item.starts:item.due)}${type==='class'?'–'+time(item.ends):''}</p><div class="detail-facts">${type==='class'?`<p><span>Location</span><strong>${esc(item.room||'Room not specified')}</strong></p><p><span>Group</span><strong>OCC ${esc(item.occ||'—')}</strong></p>`:`<p><span>Course</span><strong>${esc(item.course)}</strong></p>`}<p><span>Source</span><strong>${esc(item.source)}</strong></p></div><div class="detail-actions">${type==='class'?`<button id="detail-edit">Edit this class</button>${item.semester_id?`<a href="#semester/${esc(item.semester_id)}" id="detail-series">Edit weekly pattern</a>`:''}`:item.source==='manual'?`<button id="detail-edit-task">Edit deadline</button><button id="detail-done">${active(item)?'Mark done':'Reopen'}</button>`:external(item.url,'Open assignment')}<button class="danger" id="detail-remove" ${type==='task'&&item.source!=='manual'?'hidden':''}>${type==='class'&&item.semester_id?'Cancel this class':'Remove'}</button></div>`;
+ const d=$('#details');$('#detail-content').innerHTML=`<p class="eyebrow">${esc(type==='class'?item.course+' · '+item.kind:status(item))}</p><h2>${esc(type==='class'?label(item.course):plainText(item.title))}</h2><p class="detail-date">${esc(day(type==='class'?item.starts:item.due))} · ${time(type==='class'?item.starts:item.due)}${type==='class'?'–'+time(item.ends):''}</p><div class="detail-facts">${type==='class'?`<p><span>Location</span><strong>${esc(item.room||'Room not specified')}</strong></p><p><span>Group</span><strong>OCC ${esc(item.occ||'—')}</strong></p>`:`<p><span>Course</span><strong>${esc(item.course)}</strong></p>`}<p><span>Source</span><strong>${esc(item.source)}</strong></p></div><div class="detail-actions">${type==='class'?`<button id="detail-edit">Edit this class</button>${item.semester_id?`<a href="#semester/${esc(item.semester_id)}" id="detail-series">Edit weekly pattern</a>`:''}`:item.source==='manual'?`<button id="detail-edit-task">Edit deadline</button><button id="detail-done">${active(item)?'Mark done':'Reopen'}</button>`:external(item.url,'Open assignment')}<button class="danger" id="detail-remove" ${type==='task'&&item.source!=='manual'?'hidden':''}>${type==='class'&&item.semester_id?'Cancel this class':'Remove'}</button></div>`;
  $('#detail-series')?.addEventListener('click',()=>d.close());
  $('#detail-edit')?.addEventListener('click',()=>{d.close();editor('class',id);});
  $('#detail-edit-task')?.addEventListener('click',()=>{d.close();editor('task',id);});
@@ -82,7 +83,7 @@ function updates(){
  const options=categories.map(([kind,title])=>`<option value="${kind}" ${updateFilter===kind?'selected':''}>${title}</option>`).join('');
  const groups=categories.filter(([kind])=>kind===updateFilter).map(([kind,title])=>{
   const items=rows.filter(u=>(['announcement','deadline'].includes(u.kind)?u.kind:'material')===kind);
-  return items.length?`<section class="panel update-group"><div class="panel-heading"><h2>${title}</h2><span class="badge">${items.length}</span></div>${items.map(u=>`<article class="update"><div class="task-meta"><span>${esc(u.course)}</span><span>${esc(day(u.changed))}</span></div><h3>${u.seen?'':'• '}${esc(u.title)}</h3>${u.body&&u.body!=='Open SPeCTRUM to view the latest version.'?`<p>${esc(typeof u.body==='string'?u.body:'')}</p>`:''}${external(u.url,'Open in SPeCTRUM')} ${!u.seen?`<button class="quiet" data-seen="${esc(u.id)}">Mark read</button>`:''}</article>`).join('')}</section>`:'';
+  return items.length?`<section class="panel update-group"><div class="panel-heading"><h2>${title}</h2><span class="badge">${items.length}</span></div>${items.map(u=>`<article class="update"><div class="task-meta"><span>${esc(u.course)}</span><span>${esc(day(u.changed))}</span></div><h3>${u.seen?'':'• '}${esc(plainText(u.title))}</h3>${u.body&&u.body!=='Open SPeCTRUM to view the latest version.'?`<p>${esc(plainText(typeof u.body==='string'?u.body:''))}</p>`:''}${external(u.url,'Open in SPeCTRUM')} ${!u.seen?`<button class="quiet" data-seen="${esc(u.id)}">Mark read</button>`:''}</article>`).join('')}</section>`:'';
  }).join('');
  const empty=rows.length?`<div class="empty"><h2>No ${categories.find(([kind])=>kind===updateFilter)[1].toLowerCase()}${filter==='all'?' yet':' for this course'}</h2></div>`:updatesEmpty();
  return heading('Course updates')+`<div class="filter-row">${courseSelect()}<label><span>Filter by type</span><select id="update-filter">${options}</select></label></div>`+(groups||`<section class="panel">${empty}</section>`);
@@ -124,10 +125,10 @@ function editor(type,id){
  form.elements.original.value=JSON.stringify(item||{});
  $('#editor-title').textContent=id?(type==='task'?'Edit deadline':'Edit class'):(type==='task'?'Add deadline':'Add class');
  $('#task-fields').hidden=type!=='task';$('#class-fields').hidden=type!=='class';
- form.elements.course.innerHTML=state.courses.map(c=>`<option>${esc(c.code)}</option>`).join('');
+ form.elements.course.innerHTML=state.courses.map(c=>`<option value="${esc(c.code)}">${esc(c.code)} � ${esc(label(c.code))}</option>`).join('');
  if(item){for(const k of ['course','kind','room','occ','title','reminder_minutes'])if(form.elements[k]&&item[k]!=null)form.elements[k].value=item[k];for(const k of ['starts','ends','due'])if(item[k])form.elements[k].value=localInput(item[k]);}
  if(saved)for(const k of ['course','kind','room','occ','title','reminder_minutes','starts','ends','due','original'])if(saved[k]!=null)form.elements[k].value=saved[k];
- $('#form-error').textContent=saved?'Your unfinished draft has been restored.':'Drafts stay in this tab until you save, discard, or sign out.';editorConflict();$('#editor').showModal();
+ $('#form-error').className='form-feedback';$('#form-error').textContent=saved?'Your unfinished draft has been restored.':'Drafts stay in this tab until you save, discard, or sign out.';editorConflict();$('#editor').showModal();
 
 }
 function localInput(d){return dateKey(d)+'T'+time(d);}
@@ -186,11 +187,11 @@ $('#editor-form').addEventListener('submit',async e=>{
  e.preventDefault();if(saving)return;
  const form=e.target,data=Object.fromEntries(new FormData(form)),type=data.type;captureEditor();
  if(data.edit==='yes')data.original=JSON.parse(data.original);
- for(const k of type==='task'?['due']:['starts','ends']){if(!data[k]){$('#form-error').textContent='Enter the required date and time.';return;}data[k]=new Date(data[k]+':00+08:00').toISOString();}
- if(type==='task'&&!data.title.trim()){$('#form-error').textContent='Give your deadline a title.';return;}
- saving=true;$('#editor-fields').disabled=true;$('#save-editor').textContent='Saving…';$('#form-error').textContent='Saving to your planner…';form.setAttribute('aria-busy','true');
+ for(const k of type==='task'?['due']:['starts','ends']){if(!data[k]){$('#form-error').className='form-feedback danger';$('#form-error').textContent='Enter the required date and time.';return;}data[k]=new Date(data[k]+':00+08:00').toISOString();}
+ if(type==='task'&&!data.title.trim()){$('#form-error').className='form-feedback danger';$('#form-error').textContent='Give your deadline a title.';return;}
+ $('#form-error').className='form-feedback';saving=true;$('#editor-fields').disabled=true;$('#save-editor').textContent='Saving…';$('#form-error').textContent='Saving to your planner…';form.setAttribute('aria-busy','true');
  try{await api(type==='task'?(data.edit==='yes'?'task-update':'tasks'):'classes',data);deleteDraft(editorKey);editorKey=null;$('#editor').close();if(await load(true))toast('Saved to your planner.');}
- catch(err){$('#form-error').textContent=err.message+' Your entries are still here.'+(err.status===409?'':' Review them and retry Save to check or complete the same save.');if(err.status===409&&data.edit==='yes')await load();}
+ catch(err){$('#form-error').className='form-feedback danger';$('#form-error').textContent=err.message+' Your entries are still here.'+(err.status===409?'':' Review them and retry Save to check or complete the same save.');if(err.status===409&&data.edit==='yes')await load();}
  finally{saving=false;$('#editor-fields').disabled=false;$('#save-editor').textContent='Save to my planner';form.removeAttribute('aria-busy');}
 });
 $('#editor-form').addEventListener('input',captureEditor);
