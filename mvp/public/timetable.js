@@ -1,3 +1,4 @@
+import {courseLabel} from './presentation.js';
 export function semesterForDate(semesters,date){return semesters.filter(s=>s.start<=date&&s.end>=date).sort((a,b)=>b.start.localeCompare(a.start))[0]||null;}
 const DAY=86400000;
 
@@ -21,9 +22,10 @@ export function weekLayout(classes,today,offset=0,filter='all'){
  return {days:visible,slots,start:Math.floor(Math.min(480,...entries.map(e=>e.start))/60)*60,end:Math.ceil(Math.max(1140,...entries.map(e=>e.end))/60)*60};
 }
 
-export function timetableView(state,{today,week,filter,selectedDay,esc,fmt,time,day,courseSelect,now=Date.now()}){
+export function timetableView(state,{today,week,filter,selectedDay,esc,fmt,time,day,courseSelect,mode='auto',now=Date.now()}){
  const layout=weekLayout(state.classes,today,week,filter),{days,slots,start,end}=layout;
- const selected=days.find(d=>d.date===selectedDay)||days.find(d=>d.date===today)||days[0];
+ const agendaDays=Array.from({length:7},(_,i)=>{const stamp=days[0].stamp+i*DAY;return days.find(d=>d.stamp===stamp)||{stamp,date:new Date(stamp+8*3600000).toISOString().slice(0,10),entries:[]};});
+ const selected=agendaDays.find(d=>d.date===selectedDay)||agendaDays.find(d=>d.date===today)||days[0];
  const semester=semesterForDate(state.semesters||[],selected.date);
  const weekNumber=semester?Math.floor((days[0].stamp-Date.parse(semester.week1+'T00:00:00+08:00'))/(7*DAY))+1:null;
  const weekCount=semester?Math.floor((Date.parse(semester.end+'T00:00:00+08:00')-Date.parse(semester.week1+'T00:00:00+08:00'))/(7*DAY))+1:null;
@@ -31,10 +33,11 @@ export function timetableView(state,{today,week,filter,selectedDay,esc,fmt,time,
  const range=fmt(days[0].stamp,{month:'short'})===fmt(days.at(-1).stamp,{month:'short'})?`${fmt(days[0].stamp,{day:'numeric'})}–${fmt(days.at(-1).stamp,{day:'numeric',month:'short'})}`:`${fmt(days[0].stamp,{day:'numeric',month:'short'})} – ${fmt(days.at(-1).stamp,{day:'numeric',month:'short'})}`;
  const hours=Array.from({length:(end-start)/60+1},(_,i)=>start/60+i);
  const nowMinutes=(now-Date.parse(today+'T00:00:00+08:00'))/60000;
- const courseName=c=>state.courses.find(x=>x.code===c.course)?.name||c.course;
+ const courseName=c=>courseLabel(c.course,state.courses.find(x=>x.code===c.course)?.name||c.course);
  const code=c=>{const parts=String(c.course).match(/^([a-z]+)(\d.*)$/i);return parts?esc(parts[1])+'<wbr>'+esc(parts[2]):esc(c.course);};
- return `<section class="timetable-page ${slots.length?'':'is-empty'}"><header class="schedule-heading"><div><p class="eyebrow">${esc(semester?.name||'YOUR TIMETABLE · '+fmt(days[0].stamp,{year:'numeric'}))}</p><div class="schedule-title"><h1>${esc(range)}</h1>${weekNumber>0?`<span class="semester-week" aria-label="Week ${weekNumber} of ${weekCount}"><strong>W${weekNumber}</strong><span>OF ${weekCount}</span></span>`:''}</div><p class="schedule-meta"><span><strong>${slots.length}</strong> ${slots.length===1?'class':'classes'}</span><span><strong>${Number(total.toFixed(1))}</strong> hours this week</span></p></div><button class="primary schedule-add" data-add="class" aria-label="Add class"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Add class</span></button></header>
- <div class="schedule-toolbar"><div class="schedule-navigation" aria-label="Navigate timetable weeks"><button id="prev-week" aria-label="Previous week">‹</button><button id="this-week">This week</button><button id="next-week" aria-label="Next week">›</button></div>${courseSelect()}</div>
+ return `<section class="timetable-page schedule-mode-${mode} ${slots.length?'':'is-empty'}"><header class="schedule-heading"><div><p class="eyebrow">${esc(semester?.name||'YOUR TIMETABLE · '+fmt(days[0].stamp,{year:'numeric'}))}</p><div class="schedule-title"><h1 tabindex="-1">Timetable</h1>${weekNumber>0?`<span class="semester-week" aria-label="Week ${weekNumber} of ${weekCount}"><strong>W${weekNumber}</strong><span>OF ${weekCount}</span></span>`:''}</div><p class="schedule-meta"><span>${esc(range)}</span><span><strong>${slots.length}</strong> ${slots.length===1?'class':'classes'}</span><span><strong>${Number(total.toFixed(1))}</strong> hours this week</span></p></div><button class="primary schedule-add" data-add="class" aria-label="Add class"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Add class</span></button></header>
+ <div class="schedule-toolbar"><div class="schedule-navigation" aria-label="Navigate timetable weeks"><button id="prev-week" aria-label="Previous week">‹</button><button id="this-week">This week</button><button id="next-week" aria-label="Next week">›</button></div>${courseSelect()}<div class="view-choice" aria-label="Timetable view"><button data-timetable-mode="day" aria-pressed="${mode==='day'}">Day</button><button data-timetable-mode="week" aria-pressed="${mode==='week'}">Week</button></div></div>
+ <div class="day-selector" data-day-count="7" aria-label="Choose a timetable day">${agendaDays.map(d=>`<button class="schedule-day ${d.date===today?'is-today':''}" data-timetable-day="${d.date}" aria-pressed="${d===selected}"><span>${esc(fmt(d.stamp,{weekday:'short'}))}</span><strong>${esc(fmt(d.stamp,{day:'numeric'}))}</strong></button>`).join('')}</div>
  ${!slots.length?`<div class="schedule-empty" role="status"><svg aria-hidden="true"><use href="#calendar"/></svg><h2>${filter==='all'?'No classes this week':'No classes for this course'}</h2><p>${filter==='all'?'Your saved timetable is clear for these dates.':'Try another course or return to All courses.'} You can still browse weeks or add a class.</p></div>`:''}
  <div class="schedule-scroll" role="region" aria-label="Weekly timetable in Malaysia time" tabindex="0"><div class="schedule-grid" data-day-count="${days.length}" data-grid-hours="${(end-start)/60}">
  <div class="schedule-days"><span class="schedule-zone">MYT</span>${days.map(d=>`<button class="schedule-day ${d.date===today?'is-today':''}" data-timetable-day="${d.date}" aria-pressed="${d===selected}" aria-label="${esc(day(d.stamp))}${d.date===today?', today':''}, ${d.entries.length} ${d.entries.length===1?'class':'classes'}"><span>${esc(fmt(d.stamp,{weekday:'short'}))}</span><strong>${esc(fmt(d.stamp,{day:'numeric'}))}</strong>${d.date===today?'<i aria-hidden="true"></i>':''}</button>`).join('')}</div>
@@ -47,8 +50,10 @@ export function timetableView(state,{today,week,filter,selectedDay,esc,fmt,time,
 }
 
 export function applyTimetableLayout(root=document){
+ for(const page of root.querySelectorAll('.schedule-mode-auto')){const mode=globalThis.matchMedia?.('(max-width:700px)').matches?'day':'week';for(const button of page.querySelectorAll('[data-timetable-mode]'))button.setAttribute('aria-pressed',String(button.dataset.timetableMode===mode));}
  // Set layout through CSS properties, as the app's CSP deliberately blocks HTML style attributes.
- for(const e of root.querySelectorAll('[data-grid-hours]')){e.style.setProperty('--day-count',e.dataset.dayCount);e.style.setProperty('--grid-hours',e.dataset.gridHours);}
+ for(const e of root.querySelectorAll('[data-day-count]'))e.style.setProperty('--day-count',e.dataset.dayCount);
+ for(const e of root.querySelectorAll('[data-grid-hours]'))e.style.setProperty('--grid-hours',e.dataset.gridHours);
  for(const e of root.querySelectorAll('[data-schedule-top]'))e.style.top=e.dataset.scheduleTop+'%';
  for(const e of root.querySelectorAll('[data-schedule-height]'))e.style.height=e.dataset.scheduleHeight+'%';
  for(const e of root.querySelectorAll('[data-lanes]')){e.style.left='calc('+Number(e.dataset.lane)/Number(e.dataset.lanes)*100+'% + 2px)';e.style.width='calc('+100/Number(e.dataset.lanes)+'% - 4px)';}

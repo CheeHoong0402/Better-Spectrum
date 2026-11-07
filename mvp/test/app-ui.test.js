@@ -199,3 +199,11 @@ test('Updates displays one category at a time and combines category and course f
  a.node('#update-filter').events.change({target:{value:'deadline'}});assert.match(a.run('updates()'),/Assignment due|data-seen="deadline"/);
  a.run("filter='C'");assert.match(a.run('updates()'),/Clear filter/);
 });
+
+
+test('Today labels historical and future classes honestly and separates overdue work',()=>{
+ const a=app(),classes=[{id:'old',course:'A',kind:'Lecture',starts:'2000-01-03T09:00:00+08:00',ends:'2000-01-03T10:00:00+08:00'},{id:'next',course:'A',kind:'Lecture',starts:'2099-01-05T09:00:00+08:00',ends:'2099-01-05T10:00:00+08:00'}];
+ a.run(`state=${JSON.stringify({...empty(),courses:[{code:'A',name:'A Computing'}],classes,tasks:[{id:'late',course:'A',title:'Old task',due:'2000-01-01',status:'pending'},{id:'future',course:'A',title:'Future task',due:'2099-01-05',status:'pending'},{id:'bad',course:'A',title:'Check date',due:'invalid',status:'unknown'}]})};agendaDay='2000-01-03';`);
+ const historical=a.run('today()');assert.doesNotMatch(historical,/class="next-class"/);assert.match(historical,/Computing/);assert.match(historical,/Overdue/);assert.match(historical,/Upcoming/);assert.match(historical,/Due date unverified/);
+ a.run("agendaDay='2099-01-05'");const future=a.run('today()');assert.match(future,/Next class/);assert.equal((future.match(/data-detail-id="next"/g)||[]).length,1);assert.doesNotMatch(future,/No classes or deadlines/);
+});

@@ -52,7 +52,18 @@ test('the current-time marker updates without redrawing or moving focus and hide
 });
 test('an empty week has a compact empty state while keeping navigation, day selection and add-class controls',()=>{
  const state={classes:[],courses:[],semesters:[]},html=timetableView(state,helpers);
- assert.match(html,/timetable-page is-empty/);assert.match(html,/No classes this week/);assert.match(html,/role="status"/);
+ assert.match(html,/timetable-page[^"]*is-empty/);assert.match(html,/No classes this week/);assert.match(html,/role="status"/);
  for(const control of ['prev-week','this-week','next-week','data-timetable-day','data-add="class"','aria-label="Add class"'])assert.ok(html.includes(control));
  const filtered=timetableView(state,{...helpers,filter:'WIX1001'});assert.match(filtered,/No classes for this course/);assert.match(filtered,/return to All courses/);
+});
+
+
+test('day and week presentations share dates and keep an empty weekend selectable',()=>{
+ const state={classes:[entry('lecture','2026-11-05','09:00','10:00')],courses:[],semesters:[]};
+ const html=timetableView(state,{...helpers,mode:'day',selectedDay:'2026-11-07'});
+ assert.match(html,/schedule-mode-day/);assert.match(html,/data-timetable-day="2026-11-07" aria-pressed="true"/);
+ assert.match(html,/Saturday 7 Nov/);assert.match(html,/No saved classes for this day/);
+ const week=timetableView(state,{...helpers,mode:'week',selectedDay:'2026-11-07'});
+ assert.match(week,/data-timetable-mode="week" aria-pressed="true"/);
+ assert.match(week,/data-detail-id="lecture"/);assert.match(week,/Saturday 7 Nov/);
 });
