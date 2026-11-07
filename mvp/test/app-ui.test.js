@@ -246,3 +246,10 @@ test('imported deadline detail and confirmation explain planner-only deletion an
  a.run(`state.removed=[{type:'task',item:${JSON.stringify({...task,due:'invalid'})}}]`);
  const removed=a.run("removedView('task')");assert.match(removed,/Deleted deadlines/);assert.match(removed,/Due date unverified/);assert.match(removed,/Assignment &amp; notes/);
 });
+
+
+test('daily heading follows the selected weekday and date instead of always saying Today',()=>{
+ const a=app();a.run(`state=${JSON.stringify(empty())};agendaDay='2026-11-09';`);
+ let html=a.run('today()');assert.match(html,/<h1 tabindex="-1">Monday<\/h1>/);assert.match(html,/9 November 2026/);assert.doesNotMatch(html,/<h1[^>]*>Today/);
+ a.run("agendaDay='2026-11-10'");html=a.run('today()');assert.match(html,/<h1 tabindex="-1">Tuesday<\/h1>/);assert.match(html,/10 November 2026/);assert.match(html,/id="agenda-today">Today/,'keep the explicit return-to-today control');
+});
