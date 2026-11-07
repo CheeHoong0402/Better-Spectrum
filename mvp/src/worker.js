@@ -132,7 +132,11 @@ async function api(request,env,url){
   return json({ok:true,message:data.delayed?'Test queued for this device in two minutes. Close the app, then check this device.':'Test request processed for this device. Check its notifications and delivery details.'});
  }
  case '/api/connect':{const courses=await connect(env,data.token);await setAttendanceEnabled(env,false);await env.DB.prepare("DELETE FROM settings WHERE key IN ('attendance_cookie','attendance_connection','attendance_mobile','attendance_pair')").run();return json({ok:true,courses});}
- case '/api/sync':{const events=await syncCourse(env,0);for(const e of events||[])await queue(env,e.id,{title:e.title,body:e.body.slice(0,160),url:'/#updates',scope:e.scope});return json({ok:true});}
+ case '/api/sync':{
+  const index=Number(await setting(env.DB,'manual_sync_index'))||0;
+  await setting(env.DB,'manual_sync_index',index+1);
+  const events=await syncCourse(env,index);for(const e of events||[])await queue(env,e.id,{title:e.title,body:e.body.slice(0,160),url:'/#updates',scope:e.scope});return json({ok:true});
+ }
  case '/api/disconnect':await setAttendanceEnabled(env,false);await env.DB.prepare("DELETE FROM settings WHERE key IN ('moodle_token','connection','courses','attendance_cookie','attendance_connection','attendance_mobile','attendance_pair')").run();return json({ok:true});
  default:return json({error:'Not found'},404);
  }

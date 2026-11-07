@@ -10,15 +10,15 @@ async function fixture(t,assignments=[assignment(1)],modules=[]){
  const {DB,sqlite}=database(),env={DB,AUTH_SECRET:'test-only'};
  await setting(DB,'moodle_token',await seal('test-token',env.AUTH_SECRET));
  await setting(DB,'courses',JSON.stringify([{id:1,code:'TEST101'}]));
- const data={assignments,modules,statuses:new Map(),forumError:false,assignmentError:false,groupError:false,groups:[{id:10,name:'GROUP 10',idnumber:'2026@2027@1@10'}],sections:null,posts:new Map(),statusCalls:[],forumCalls:[]};
+ const data={assignments,modules,assignmentWarnings:[],courseCalls:[],statuses:new Map(),forumError:false,assignmentError:false,groupError:false,groups:[{id:10,name:'GROUP 10',idnumber:'2026@2027@1@10'}],sections:null,posts:new Map(),statusCalls:[],forumCalls:[]};
  const originalFetch=globalThis.fetch;
  globalThis.fetch=async(url,options)=>{
   assert.equal(url,'https://spectrum.um.edu.my/webservice/rest/server.php');
   const p=options.body;assert.equal(p.get('wstoken'),'test-token');
   switch(p.get('wsfunction')){
-   case 'core_course_get_contents':return Response.json(data.sections||[{id:1,name:'General',modules:[...data.modules,...data.assignments.map(a=>({id:a.cmid,name:a.name,modname:'assign'}))]}]);
+   case 'core_course_get_contents':data.courseCalls.push(Number(p.get('courseid')));return Response.json(data.sections||[{id:1,name:'General',modules:[...data.modules,...data.assignments.map(a=>({id:a.cmid,name:a.name,modname:'assign'}))]}]);
    case 'core_group_get_course_user_groups':return Response.json(data.groupError?{exception:'moodle_exception',errorcode:'accessexception'}:{groups:data.groups});
-   case 'mod_assign_get_assignments':return Response.json(data.assignmentError?{exception:'moodle_exception',errorcode:'invalidtoken'}:{courses:[{assignments:data.assignments}]});
+   case 'mod_assign_get_assignments':return Response.json(data.assignmentError?{exception:'moodle_exception',errorcode:'invalidtoken'}:{courses:[{assignments:data.assignments}],warnings:data.assignmentWarnings});
    case 'mod_assign_get_submission_status':{
     const id=Number(p.get('assignid'));data.statusCalls.push(id);
     return Response.json(data.statuses.get(id)||{lastattempt:{submission:{status:'new'}}});
@@ -67,6 +67,49 @@ test('failed submission checks retain confirmed results and aggregate warnings u
  await syncCourse(env,0);
  assert.equal(await setting(DB,'partial:1'),undefined);
  assert.equal(sqlite.prepare("SELECT status FROM tasks WHERE id='assign-101'").get().status,'pending');
+});
+
+test('assignment access warnings outside the allowed scope do not mark a course as partial',async t=>{
+ const {env,data,DB,sqlite}=await fixture(t);
+ data.sections=[{id:1,name:'General',modules:[{id:101,name:'My assignment',modname:'assign'},{id:102,name:'Hidden assignment',modname:'assign',uservisible:false}]},{id:2,name:'OCC 4',modules:[{id:103,name:'Other group assignment',modname:'assign'}]}];
+ data.assignmentWarnings=[102,103,999].map(itemid=>({item:'module',itemid,warningcode:'1',message:'No access rights in module context'}));
+ await setting(DB,'partial:1','Old generic warning');
+ await syncCourse(env,0);
+ assert.equal(await setting(DB,'partial:1'),undefined);
+ assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM tasks').get().n,1);
+ data.assignmentWarnings.push({item:'module',itemid:101,warningcode:'1',message:'No access rights in module context'});
+ await syncCourse(env,0);
+ assert.match(await setting(DB,'partial:1'),/Some assignments are unavailable/);
+ data.assignmentWarnings=[{item:'course',itemid:1,warningcode:'2',message:'User is not enrolled'}];
+ await syncCourse(env,0);
+ assert.match(await setting(DB,'partial:1'),/Some assignments are unavailable/);
+ data.assignmentWarnings=[{item:'module',itemid:999,warningcode:'unexpected',message:'Unknown failure'}];
+ await syncCourse(env,0);
+ assert.match(await setting(DB,'partial:1'),/Some assignments are unavailable/);
+});
+
+test('normal submission batching keeps earlier statuses without a partial-sync warning',async t=>{
+ const {env,DB,sqlite}=await fixture(t,Array.from({length:9},(_,i)=>assignment(i+1)));
+ await syncCourse(env,0);
+ assert.equal(await setting(DB,'partial:1'),undefined);
+ assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM tasks WHERE status='unknown'").get().n,1);
+ await syncCourse(env,0);
+ assert.equal(await setting(DB,'partial:1'),undefined);
+ assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM tasks WHERE status='unknown'").get().n,0);
+});
+
+test('manual course checks rotate, including after a failed check',async t=>{
+ const {env,DB,data}=await fixture(t,[]);
+ await setting(DB,'courses',JSON.stringify([{id:1,code:'TEST101'},{id:2,code:'TEST102'}]));
+ const expiry=String(Date.now()+60000),cookie=`sm_session=${expiry}.${await sign(expiry,env.AUTH_SECRET)}`;
+ const check=()=>worker.fetch(new Request('https://test.example/api/sync',{method:'POST',headers:{Origin:'https://test.example','Content-Type':'application/json',Cookie:cookie},body:'{}'}),{...env,APP_PASSWORD:'test'});
+ assert.equal((await check()).status,200);
+ data.groupError=true;
+ assert.equal((await check()).status,500);
+ data.groupError=false;
+ assert.equal((await check()).status,200);
+ assert.equal((await check()).status,200);
+ assert.deepEqual(data.courseCalls,[1,2,1,2]);
 });
 
 test('incomplete submission responses remain unverified and team drafts remain unfinished',async t=>{

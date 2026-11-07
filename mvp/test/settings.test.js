@@ -22,6 +22,7 @@ test('settings rows lead to the existing functional controls',()=>{
  for(const id of ['device-push','delivery-status'])assert.ok(notifications.includes('id="'+id+'"'));
  const connection=settings('#settings/connection');
  for(const id of ['connect-form','sync','disconnect'])assert.ok(connection.includes('id="'+id+'"'));
+ assert.match(connection,/Check next course now/);assert.match(connection,/Courses and submission statuses are checked in rotation/);
  assert.ok(settings('#settings/account').includes('id="logout"'));
  for(const route of ['#settings/attendance','#settings/timetable']){const oldPage=settings(route);assert.match(oldPage,/<h1[^>]*>Settings<\/h1>/);assert.doesNotMatch(oldPage,/attendance-check|attendance-session|Today & tomorrow/);}
  assert.match(connection,/id="attendance-support"/);assert.match(connection,/id="attendance-qr"/);assert.doesNotMatch(connection,/id="attendance-enabled"/);

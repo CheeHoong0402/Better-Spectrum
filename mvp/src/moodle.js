@@ -90,11 +90,11 @@ export async function syncCourse(env,index){
  }
  const response=await call(token,'mod_assign_get_assignments',{'courseids[0]':c.id});
  if(!Array.isArray(response.courses))throw new Error('SPeCTRUM did not return assignment data.');
- if(response.warnings?.length)warnings.add('Some assignments are unavailable from SPeCTRUM.');
  const allowedModules=new Set(modules.filter(m=>m.modname==='assign').map(m=>Number(m.id)));
+ // Moodle also warns about restricted assignments outside the student's visible scope.
+ if(response.warnings?.some(w=>!(w.item==='module'&&String(w.warningcode)==='1'&&Number(w.itemid)>0&&!allowedModules.has(Number(w.itemid)))))warnings.add('Some assignments are unavailable from SPeCTRUM.');
  const assignments=(response.courses||[]).filter(course=>course.id==null||Number(course.id)===Number(c.id)).flatMap(course=>course.assignments||[]).filter(a=>a.duedate&&allowedModules.has(Number(a.cmid))).sort((a,b)=>a.id-b.id);
  const statusIds=new Set(Array.from({length:Math.min(8,assignments.length)},(_,i)=>assignments[(round*8+i)%assignments.length].id));
- if(assignments.length>8)warnings.add('Some submission statuses were not checked this pass; checks rotate and last known results are kept.');
  for(const a of assignments){
   const id=`assign-${a.cmid}`, due=new Date(a.duedate*1000).toISOString(),url=`https://spectrum.um.edu.my/mod/assign/view.php?id=${a.cmid}`;
   writes.push(env.DB.prepare('INSERT OR IGNORE INTO update_scopes SELECT id,? FROM updates WHERE course=? AND substr(id,1,length(?))=?').bind(`module:${a.cmid}`,c.code,`deadline:${id}:`,`deadline:${id}:`));
