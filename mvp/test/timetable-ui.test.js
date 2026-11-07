@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {weekLayout,timetableView,updateTimetableClock} from '../public/timetable.js';
+import {weekLayout,timetableView,updateTimetableClock,applyTimetableLayout} from '../public/timetable.js';
 
 const entry=(id,date,start,end,extra={})=>({id,course:'WIX1001',kind:'Lecture',starts:`${date}T${start}:00+08:00`,ends:`${date}T${end}:00+08:00`,room:'DK 1',occ:'1',source:'manual',...extra});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -66,4 +66,12 @@ test('day and week presentations share dates and keep an empty weekend selectabl
  const week=timetableView(state,{...helpers,mode:'week',selectedDay:'2026-11-07'});
  assert.match(week,/data-timetable-mode="week" aria-pressed="true"/);
  assert.match(week,/data-detail-id="lecture"/);assert.match(week,/Saturday 7 Nov/);
+});
+
+
+test('day selection remains visible in a horizontally scrolling date rail',()=>{
+ const strip={scrollLeft:0,offsetLeft:20,clientWidth:200,querySelector:()=>({offsetLeft:270,clientWidth:44})};
+ const root={querySelectorAll:s=>s==='.date-strip,.day-selector'?[strip]:[]};
+ applyTimetableLayout(root);assert.equal(strip.scrollLeft,172);
+ strip.querySelector=()=>({offsetLeft:20,clientWidth:44});applyTimetableLayout(root);assert.equal(strip.scrollLeft,0);
 });

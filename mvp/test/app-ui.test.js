@@ -218,5 +218,13 @@ test('deadline sections agree with Today and keep imported records read-only',()
 test('long announcements remain fully available and inspection never marks them read',()=>{
  const a=app(),body='Important information '.repeat(30)+'<script>inert</script>';
  a.run(`state=${JSON.stringify({...empty(),updates:[{id:'news',course:'A',kind:'announcement',title:'Announcement',body,changed:'2026-11-07',seen:0}]})};updateFilter='announcement';`);
- const html=a.run('updates()');assert.match(html,/1 results · 1 unread/);assert.match(html,/Show more/);assert.match(html,/Show less/);assert.match(html,/&lt;script&gt;inert&lt;\/script&gt;/);assert.ok(!html.includes('<script>'));assert.equal(a.run('state.updates[0].seen'),0);
+ const html=a.run('updates()');assert.match(html,/1 result · 1 unread/);assert.match(html,/Show more/);assert.match(html,/Show less/);assert.match(html,/&lt;script&gt;inert&lt;\/script&gt;/);assert.ok(!html.includes('<script>'));assert.equal(a.run('state.updates[0].seen'),0);
+});
+
+
+test('first sign-in is neutral while an expired loaded session and rejected password explain the failure',async()=>{
+ const a=app();a.setFetch(async()=>Response.json({error:'Sign in again'},{status:401}));
+ await a.run('load()');assert.equal(a.node('#login-error').textContent,'');
+ a.run(`state=${JSON.stringify(empty())};`);await a.run('load()');assert.equal(a.node('#login-error').textContent,'Sign in again');
+ await assert.rejects(a.run("api('login',{password:'wrong'})"));assert.equal(a.node('#login-error').textContent,'Sign in again');
 });

@@ -57,8 +57,8 @@ export function semesterView(state){
  </div><button class="quiet danger" type="button" data-remove-series="${escape(s.id)}">Remove weekly class ${i+1}</button></fieldset></details>`).join('')}</div>
  <button type="button" id="add-weekly-class">+ Add weekly class</button>${draft.removedRows?.length?'<button type="button" id="undo-weekly-class">Undo weekly row removal</button>':''}</section>
  <p id="semester-error" class="danger" role="alert" tabindex="-1"></p><p id="semester-message" role="status">${saving?'Saving your semester…':''}</p>
- <details class="semester-tools"><summary>Import and export</summary><div class="actions"><button type="button" id="export-semester">Export schedule</button><label class="semester-import">Import schedule JSON<input id="import-semester" type="file" accept="application/json,.json"></label></div></details><div class="semester-action-bar"><button type="button" id="discard-semester" class="quiet danger">Discard draft</button><button id="preview-semester" class="primary" type="submit" ${conflict?'disabled':''}>Preview changes</button><button type="button" id="save-semester" disabled hidden>Confirm and save</button></div>
- </fieldset></form><section id="semester-preview" aria-live="polite"></section></section>`;
+ <details class="semester-tools"><summary>Import and export</summary><div class="actions"><button type="button" id="export-semester">Export schedule</button><label class="semester-import">Import schedule JSON<input id="import-semester" type="file" accept="application/json,.json"></label></div></details><section id="semester-preview" aria-live="polite"></section><div class="semester-action-bar"><button type="button" id="discard-semester" class="quiet danger">Discard draft</button><button id="preview-semester" class="primary" type="submit" ${conflict?'disabled':''}>Preview changes</button><button type="button" id="save-semester" disabled hidden>Confirm and save</button></div>
+ </fieldset></form></section>`;
 }
 function capture(){
  const form=document.querySelector('#semester-form');
