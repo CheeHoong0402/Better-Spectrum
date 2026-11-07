@@ -94,3 +94,20 @@ test('semester saving stays locked across navigation and unlocks after success o
   else assert.equal(a.run('draft.revision'),2);
  }
 });
+
+
+test('invalid inputs reveal every containing disclosure before focus',()=>{
+ const a=semesterApp(),outer={open:false,parentElement:null},inner={open:false,parentElement:{closest:()=>outer}};
+ let focused=false;
+ a.node('#semester-form').events.invalid({target:{closest:()=>inner,focus(){focused=true;}}});
+ assert.equal(inner.open,true);assert.equal(outer.open,true);assert.equal(focused,true);
+});
+
+test('editing after a preview hides confirmation until another preview succeeds',async()=>{
+ const a=semesterApp('#semester/term',{api:async()=>({definition:{...JSON.parse(a.run('JSON.stringify(definition())'))},token:'preview',counts:{added:1,updated:0,removed:0,kept:0,cancelled:0},classes:[]})});
+ await a.node('#semester-form').events.submit({preventDefault(){},submitter:a.node('preview-button')});
+ assert.equal(a.node('#save-semester').hidden,false);assert.equal(a.node('#save-semester').disabled,false);
+ a.rootValues.name.value='Changed after preview';a.node('#semester-form').events.input();
+ assert.equal(a.node('#save-semester').hidden,true);assert.equal(a.node('#save-semester').disabled,true);assert.equal(a.run('preview'),null);
+ const html=a.run('semesterView(state)');assert.match(html,/<details class="weekly-class"/);assert.match(html,/value="A room"/);assert.match(html,/semester-action-bar/);
+});

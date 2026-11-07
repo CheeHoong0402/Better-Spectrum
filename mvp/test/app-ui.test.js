@@ -218,5 +218,5 @@ test('deadline sections agree with Today and keep imported records read-only',()
 test('long announcements remain fully available and inspection never marks them read',()=>{
  const a=app(),body='Important information '.repeat(30)+'<script>inert</script>';
  a.run(`state=${JSON.stringify({...empty(),updates:[{id:'news',course:'A',kind:'announcement',title:'Announcement',body,changed:'2026-11-07',seen:0}]})};updateFilter='announcement';`);
- const html=a.run('updates()');assert.match(html,/1 results · 1 unread/);assert.match(html,/Show more/);assert.match(html,/Show less/);assert.match(html,/&lt;script&gt;inert&lt;\/script&gt;/);assert.ok(!html.includes('<script>'));assert.equal(a.run('state.updates[0].seen'),0);
+ const html=a.run('updates()');assert.match(html,/1 results Â· 1 unread/);assert.match(html,/Show more/);assert.match(html,/Show less/);assert.match(html,/&lt;script&gt;inert&lt;\/script&gt;/);assert.ok(!html.includes('<script>'));assert.equal(a.run('state.updates[0].seen'),0);
 });
