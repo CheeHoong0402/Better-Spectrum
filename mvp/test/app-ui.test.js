@@ -207,3 +207,16 @@ test('Today labels historical and future classes honestly and separates overdue 
  const historical=a.run('today()');assert.doesNotMatch(historical,/class="next-class"/);assert.match(historical,/Computing/);assert.match(historical,/Overdue/);assert.match(historical,/Upcoming/);assert.match(historical,/Due date unverified/);
  a.run("agendaDay='2099-01-05'");const future=a.run('today()');assert.match(future,/Next class/);assert.equal((future.match(/data-detail-id="next"/g)||[]).length,1);assert.doesNotMatch(future,/No classes or deadlines/);
 });
+
+
+test('deadline sections agree with Today and keep imported records read-only',()=>{
+ const a=app();a.run(`state=${JSON.stringify({...empty(),courses:[{code:'A'}],tasks:[{id:'late',course:'A',title:'Late',due:'2000-01-01',source:'SPeCTRUM',status:'pending'},{id:'later',course:'A',title:'Later',due:'2099-01-02',source:'manual',status:'pending'},{id:'soon',course:'A',title:'Soon',due:'2099-01-01',source:'manual',status:'pending'},{id:'done',course:'A',title:'Done',due:'2000-01-01',source:'manual',status:'done'}]})};`);
+ const html=a.run('tasks()');assert.match(html,/task-group-overdue/);assert.match(html,/task-group-upcoming/);assert.ok(html.indexOf('Soon')<html.indexOf('Later'));assert.doesNotMatch(html,/data-complete="late"/);assert.doesNotMatch(html,/task-group-completed/);
+ a.run("taskFilter='completed'");const completed=a.run('tasks()');assert.match(completed,/task-group-completed/);assert.doesNotMatch(completed,/task-group-overdue/);
+});
+
+test('long announcements remain fully available and inspection never marks them read',()=>{
+ const a=app(),body='Important information '.repeat(30)+'<script>inert</script>';
+ a.run(`state=${JSON.stringify({...empty(),updates:[{id:'news',course:'A',kind:'announcement',title:'Announcement',body,changed:'2026-11-07',seen:0}]})};updateFilter='announcement';`);
+ const html=a.run('updates()');assert.match(html,/1 results · 1 unread/);assert.match(html,/Show more/);assert.match(html,/Show less/);assert.match(html,/&lt;script&gt;inert&lt;\/script&gt;/);assert.ok(!html.includes('<script>'));assert.equal(a.run('state.updates[0].seen'),0);
+});
