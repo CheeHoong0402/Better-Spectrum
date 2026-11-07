@@ -6,6 +6,8 @@ This is an initial sign-in implementation, not an installable release. It reuses
 
 The `Check iPhone companion` GitHub Actions workflow uses a hosted Mac to generate the Xcode project with XcodeGen and compile for the simulator. A local Mac is not required for that check. A simulator build cannot be installed on an iPhone.
 
+The regular `npm run test:http` check now also starts a separate disposable Worker with `PLANNER_LOGIN=spectrum`. It verifies rejection of passphrase login, unauthenticated writes, cross-origin requests and malformed callbacks, along with encrypted challenge-cookie issuance. It does not contact SPeCTRUM or establish a real university session. Successful owner verification, session issuance and replay prevention are separately covered by the automated Worker tests with a mocked university API.
+
 To distribute through TestFlight, an Apple Developer Program membership, signing configuration, an App Store Connect app and a signed device build are required. No enrolment or purchase is automated. Native notification delivery and installation are not implemented by this build-check workflow.
 
 For a Mac with Xcode and XcodeGen:

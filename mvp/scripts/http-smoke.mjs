@@ -8,8 +8,10 @@ run(['scripts/local-setup.mjs']);run(['scripts/build.mjs']);
 const directory=await mkdtemp(join(tmpdir(),'better-spectrum-http-'));
 const wrangler='node_modules/wrangler/bin/wrangler.js';
 run([wrangler,'d1','execute','DB','--local','--file','schema.sql','--persist-to',directory]);
-const origin='http://127.0.0.1:8791';
-const server=spawn(process.execPath,[wrangler,'dev','--ip','127.0.0.1','--port','8791','--persist-to',directory],{stdio:['ignore','pipe','pipe']});
+for(const [port,script,vars] of [['8791','smoke.mjs',[]],['8792','spectrum-smoke.mjs',['--var','PLANNER_LOGIN:spectrum']]]){
+ if(vars.length)run([wrangler,'d1','execute','DB','--local','--persist-to',directory,'--command',"INSERT OR REPLACE INTO settings (key,value) VALUES ('planner_owner','42')"]);
+ const origin='http://127.0.0.1:'+port;
+const server=spawn(process.execPath,[wrangler,'dev','--ip','127.0.0.1','--port',port,'--persist-to',directory,...vars],{stdio:['ignore','pipe','pipe']});
 let logs='';server.stdout.on('data',data=>{logs+=data;});server.stderr.on('data',data=>{logs+=data;});
 try{
  let ready=false;
@@ -19,10 +21,11 @@ try{
   await setTimeout(500);
  }
  if(!ready)throw new Error('Local server did not become ready');
- const result=spawnSync(process.execPath,['scripts/smoke.mjs'],{stdio:'inherit',env:{...process.env,SMOKE_ORIGIN:origin}});
+ const result=spawnSync(process.execPath,['scripts/'+script],{stdio:'inherit',env:{...process.env,SMOKE_ORIGIN:origin}});
  if(result.status!==0)throw new Error('HTTP smoke tests failed');
 }catch(error){console.error(logs.slice(-4000));throw error;}
 finally{
  if(process.platform==='win32')spawnSync('taskkill',['/PID',String(server.pid),'/T','/F'],{stdio:'ignore'});
  else server.kill('SIGTERM');
+}
 }
