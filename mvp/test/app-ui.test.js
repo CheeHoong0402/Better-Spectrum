@@ -253,3 +253,13 @@ test('daily heading follows the selected weekday and date instead of always sayi
  let html=a.run('today()');assert.match(html,/<h1 tabindex="-1">Monday<\/h1>/);assert.match(html,/9 November 2026/);assert.doesNotMatch(html,/<h1[^>]*>Today/);
  a.run("agendaDay='2026-11-10'");html=a.run('today()');assert.match(html,/<h1 tabindex="-1">Tuesday<\/h1>/);assert.match(html,/10 November 2026/);assert.match(html,/id="agenda-today">Today/,'keep the explicit return-to-today control');
 });
+
+
+test('SPeCTRUM-only login hides the passphrase and preserves that choice after a failed callback',async()=>{
+ const a=app();a.setFetch(async()=>Response.json({error:'Sign in',loginMethod:'spectrum'},{status:401}));
+ await a.run('load()');assert.equal(a.node('#login-form').hidden,true);assert.equal(a.node('#spectrum-signin').hidden,false);
+ a.setFetch(async()=>Response.json({error:'Sign-in expired'},{status:401}));
+ await a.run("window.completeSpectrumLogin('invalid')");assert.equal(a.node('#login-form').hidden,true);assert.equal(a.node('#spectrum-login').disabled,false);
+ assert.match(a.node('#login-error').textContent,/Sign-in expired/);
+ await a.node('#spectrum-login').onclick();assert.match(a.node('#login-error').textContent,/iPhone companion/);
+});

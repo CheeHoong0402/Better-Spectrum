@@ -33,7 +33,7 @@ async function api(path,data){
  let r;try{r=await fetch('/api/'+path,{...(data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:['state','tasks','task-update','classes','push-status','deliveries'].includes(path)?AbortSignal.timeout(30000):undefined});}catch{throw new Error('Could not reach your planner. Check your connection and try again.');}
  let v;try{v=await r.json();}catch{throw new Error('Your planner returned an unexpected response. Please try again.');}
  if(!r.ok){
-  if(r.status===401){const hadState=!!state;state=null;$('#app').hidden=true;$('#load-status').hidden=true;$('#login').hidden=false;$('#login-error').textContent=path==='state'&&!hadState?'':v.error||'Sign in to continue.';for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();}
+  if(r.status===401){const hadState=!!state;state=null;$('#app').hidden=true;$('#load-status').hidden=true;$('#login').hidden=false;if(v.loginMethod){$('#login-form').hidden=v.loginMethod==='spectrum';$('#spectrum-signin').hidden=v.loginMethod!=='spectrum';}$('#login-error').textContent=path==='state'&&!hadState?'':v.error||'Sign in to continue.';for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();}
   throw Object.assign(new Error(v.error||'The request failed. Please try again.'),{status:r.status});
  }return v;
 }
@@ -227,3 +227,18 @@ $('#close-editor').onclick=()=>{captureEditor();$('#editor').close();};$('#login
 $('#close-details').onclick=()=>$('#details').close();
 window.addEventListener('resize',()=>applyTimetableLayout());
 setInterval(()=>{if(!document.hidden)updateTimetableClock();},60000);
+
+
+let spectrumChallenge;
+$('#spectrum-login').onclick=async()=>{
+ const button=$('#spectrum-login');if(button.disabled)return;
+ if(!window.webkit?.messageHandlers?.spectrumLogin){$('#login-error').textContent='Open the Better Spectrum iPhone companion to sign in with SPeCTRUM.';return;}
+ button.disabled=true;$('#login-error').textContent='';
+ try{const flow=await api('spectrum-login-start',{});spectrumChallenge=flow.challenge;window.webkit.messageHandlers.spectrumLogin.postMessage({url:flow.url});}
+ catch(error){$('#login-error').textContent=error.message;button.disabled=false;}
+};
+window.completeSpectrumLogin=async(callback)=>{
+ try{if(!callback)throw new Error('Sign-in cancelled. You can try again.');await api('spectrum-login-finish',{challenge:spectrumChallenge,callback});spectrumChallenge=null;await load();}
+ catch(error){$('#login-error').textContent=error.message;}
+ finally{$('#spectrum-login').disabled=false;}
+};

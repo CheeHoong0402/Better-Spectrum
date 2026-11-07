@@ -1,0 +1,20 @@
+name: Check iPhone companion
+on:
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios-check.yml']
+  push:
+    branches: ['codex/**']
+    paths: ['ios/**', '.github/workflows/ios-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate --spec project.yml
+        working-directory: ios
+      - run: xcodebuild -project BetterSpectrum.xcodeproj -scheme BetterSpectrum -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
+        working-directory: ios

@@ -1,0 +1,33 @@
+name: BetterSpectrum
+options:
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    PRODUCT_BUNDLE_IDENTIFIER: app.betterspectrum.planner
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 1.0.0
+targets:
+  BetterSpectrum:
+    type: application
+    platform: iOS
+    sources: [BetterSpectrum]
+    info:
+      path: BetterSpectrum/Info.plist
+      properties:
+        CFBundleDisplayName: Better Spectrum
+        UILaunchScreen: {}
+        CFBundleURLTypes:
+          - CFBundleURLName: Spectrum Login
+            CFBundleURLSchemes: [betterspectrumlogin]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: '1,2'
+schemes:
+  BetterSpectrum:
+    build:
+      targets:
+        BetterSpectrum: all

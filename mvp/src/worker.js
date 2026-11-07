@@ -1,3 +1,4 @@
+import {spectrumOnly,plannerSessionKey,spectrumLogin} from './spectrum-login.js';
 import {RecordError,updateTask,removeRecord,restoreRecord,removedRecords} from './records.js';
 import {buildPushPayload} from '@block65/webcrypto-web-push';
 import {session,sign,digest,validPush,validDate} from './security.js';
@@ -50,11 +51,13 @@ export async function tick(env,now=Date.now()){
 }
 async function api(request,env,url){
  if(url.pathname==='/api/version'&&request.method==='GET')return json({release:env.APP_RELEASE||'development'});
- if(!env.APP_PASSWORD||!env.AUTH_SECRET)return json({error:'Private access is not configured yet. Set APP_PASSWORD and AUTH_SECRET on the server.'},503);
+ if((!spectrumOnly(env)&&!env.APP_PASSWORD)||!env.AUTH_SECRET)return json({error:'Private access is not configured yet. Set APP_PASSWORD and AUTH_SECRET on the server.'},503);
  if(request.method!=='GET'&&request.headers.get('Origin')!==url.origin)return json({error:'Request origin was not accepted.'},403);
  if(Number(request.headers.get('Content-Length')||0)>24000)return json({error:'Request too large'},413);
  let data={};if(request.method==='POST'){try{const raw=await request.text();if(raw.length>24000)return json({error:'Request too large'},413);data=JSON.parse(raw||'{}');}catch{return json({error:'Invalid request'},400);}}
+ if(['/api/spectrum-login-start','/api/spectrum-login-finish'].includes(url.pathname)&&request.method==='POST')return spectrumLogin(request,env,data,url.pathname.endsWith('-finish'));
  if(url.pathname==='/api/login'&&request.method==='POST'){
+  if(spectrumOnly(env))return json({error:'Sign in with your SPeCTRUM account.',loginMethod:'spectrum'},401);
   const ip=await digest((request.headers.get('CF-Connecting-IP')||'local')+env.AUTH_SECRET);const k=`login:${ip}`;
   let limiter=JSON.parse(await setting(env.DB,k)||'{"n":0,"until":0}');if(limiter.until<Date.now())limiter={n:0,until:Date.now()+900000};
   if(limiter.n>=8)return json({error:'Too many attempts. Try again in 15 minutes.'},429);
@@ -63,7 +66,7 @@ async function api(request,env,url){
   return json({ok:true},200,{'Set-Cookie':`sm_session=${exp}.${await sign(exp,env.AUTH_SECRET)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`});
  }
  if(url.pathname==='/api/attendance-handoff'&&request.method==='POST')return json(await acceptAttendanceHandoff(env,data));
- if(!await session(request,env.AUTH_SECRET))return json({error:'Sign in to your private planner.'},401);
+ if(!await session(request,plannerSessionKey(env)))return json({error:'Sign in to your private planner.',loginMethod:spectrumOnly(env)?'spectrum':'passphrase'},401);
  if(url.pathname==='/api/state'&&request.method==='GET'){
   const [tasks,classes,updates,subs]=await Promise.all(["SELECT t.* FROM tasks t WHERE NOT EXISTS (SELECT 1 FROM settings r WHERE r.key='removed:task:'||t.id) AND (source<>'SPeCTRUM' OR EXISTS (SELECT 1 FROM content_scopes s WHERE s.id='module:'||substr(t.id,8) AND s.allowed=1)) ORDER BY due",'SELECT c.*,o.semester_id FROM classes c LEFT JOIN class_occurrences o ON o.class_id=c.id ORDER BY julianday(c.starts)','SELECT u.* FROM updates u LEFT JOIN update_scopes us ON us.update_id=u.id LEFT JOIN content_scopes s ON s.id=us.scope_id LEFT JOIN content_scopes p ON p.id=s.parent_id WHERE us.scope_id IS NULL OR (s.allowed=1 AND (s.parent_id IS NULL OR p.allowed=1)) ORDER BY changed DESC LIMIT 60','SELECT COUNT(*) AS n FROM subscriptions'].map(q=>env.DB.prepare(q).all()));
   const partial=(await env.DB.prepare("SELECT key,value FROM settings WHERE key LIKE 'partial:%'").all()).results;
