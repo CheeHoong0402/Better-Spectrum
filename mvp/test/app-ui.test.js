@@ -209,9 +209,9 @@ test('Today labels historical and future classes honestly and separates overdue 
 });
 
 
-test('deadline sections agree with Today and keep imported records read-only',()=>{
+test('deadline sections agree with Today and keep imported fields read-only while allowing deletion',()=>{
  const a=app();a.run(`state=${JSON.stringify({...empty(),courses:[{code:'A'}],tasks:[{id:'late',course:'A',title:'Late',due:'2000-01-01',source:'SPeCTRUM',status:'pending'},{id:'later',course:'A',title:'Later',due:'2099-01-02',source:'manual',status:'pending'},{id:'soon',course:'A',title:'Soon',due:'2099-01-01',source:'manual',status:'pending'},{id:'done',course:'A',title:'Done',due:'2000-01-01',source:'manual',status:'done'}]})};`);
- const html=a.run('tasks()');assert.match(html,/task-group-overdue/);assert.match(html,/task-group-upcoming/);assert.ok(html.indexOf('Soon')<html.indexOf('Later'));assert.doesNotMatch(html,/data-complete="late"/);assert.doesNotMatch(html,/task-group-completed/);
+ const html=a.run('tasks()');assert.match(html,/task-group-overdue/);assert.match(html,/task-group-upcoming/);assert.ok(html.indexOf('Soon')<html.indexOf('Later'));assert.doesNotMatch(html,/data-complete="late"|data-edit-task="late"/);assert.match(html,/data-delete-task="late">Delete/);assert.doesNotMatch(html,/task-group-completed/);
  a.run("taskFilter='completed'");const completed=a.run('tasks()');assert.match(completed,/task-group-completed/);assert.doesNotMatch(completed,/task-group-overdue/);
 });
 
@@ -227,4 +227,22 @@ test('first sign-in is neutral while an expired loaded session and rejected pass
  await a.run('load()');assert.equal(a.node('#login-error').textContent,'');
  a.run(`state=${JSON.stringify(empty())};`);await a.run('load()');assert.equal(a.node('#login-error').textContent,'Sign in again');
  await assert.rejects(a.run("api('login',{password:'wrong'})"));assert.equal(a.node('#login-error').textContent,'Sign in again');
+});
+
+
+test('imported deadline detail and confirmation explain planner-only deletion and retain failed actions',async()=>{
+ const a=app(),task={id:'assign-123',course:'TEST101',title:'Assignment & notes',due:'2030-01-01',status:'pending',source:'SPeCTRUM'};
+ a.run(`state=${JSON.stringify({...empty(),tasks:[task]})};showDetail('task','assign-123');`);
+ assert.match(a.node('#detail-content').innerHTML,/id="detail-remove">Delete deadline/);
+ assert.doesNotMatch(a.node('#detail-content').innerHTML,/id="detail-done"|id="detail-edit-task"/);
+ a.node('#detail-remove').events.click();
+ assert.equal(a.node('#remove-title').textContent,'Delete deadline?');assert.equal(a.node('#confirm-remove').textContent,'Delete');
+ assert.match(a.node('#remove-message').textContent,/Assignment & notes/);assert.match(a.node('#remove-message').textContent,/SPeCTRUM stays unchanged/);
+ a.setFetch(async()=>Response.json({error:'Try later'},{status:503}));
+ const button=a.node('#confirm-remove');Object.assign(button,{tagName:'BUTTON',isConnected:false});
+ await button.onclick({currentTarget:button});
+ assert.equal(a.node('#remove-record').open,true);assert.equal(button.disabled,false);assert.equal(button.textContent,'Delete');
+ assert.equal(a.node('#toast').children.length,0);assert.match(a.node('#action-status').textContent,/Try later/);
+ a.run(`state.removed=[{type:'task',item:${JSON.stringify({...task,due:'invalid'})}}]`);
+ const removed=a.run("removedView('task')");assert.match(removed,/Deleted deadlines/);assert.match(removed,/Due date unverified/);assert.match(removed,/Assignment &amp; notes/);
 });

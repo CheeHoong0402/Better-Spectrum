@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {database} from '../test-support/db.js';
 import {seal,sign} from '../src/security.js';
 import {setting,syncCourse} from '../src/moodle.js';
-import worker from '../src/worker.js';
+import worker,{tick} from '../src/worker.js';
 
 const assignment=id=>({id,cmid:id+100,name:`Assignment ${id}`,duedate:1900000000+id});
 async function fixture(t,assignments=[assignment(1)],modules=[]){
@@ -142,4 +142,37 @@ test('group lookup failure preserves existing data and pauses imports with an ex
  await assert.rejects(()=>syncCourse(env,0),/group membership/);
  assert.match(await setting(DB,'partial:1'),/updates are paused/);
  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM tasks').get().n,1);
+});
+
+
+test('deleting an imported deadline survives sync, stops reminders and restores current university details',async t=>{
+ const {env,DB,sqlite,data}=await fixture(t);
+ await syncCourse(env,0);
+ const expiry=String(Date.now()+60000),cookie=`sm_session=${expiry}.${await sign(expiry,env.AUTH_SECRET)}`;
+ const post=(path,body)=>worker.fetch(new Request('https://test.example/api/'+path,{method:'POST',headers:{Origin:'https://test.example','Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(body)}),{...env,APP_PASSWORD:'test'});
+ const id='assign-101';
+ sqlite.prepare('INSERT INTO subscriptions VALUES (?,?)').run('device','{}');
+ for(const [key,sent] of [[`task:${id}:pending:device`,null],[`task:${id}:sent:device`,'sent'],['task:assign-1010:pending:device',null]])sqlite.prepare('INSERT INTO deliveries (id,subscription_id,payload,due,sent) VALUES (?,?,?,?,?)').run(key,'device','{}','2026-01-01',sent);
+ for(let i=0;i<2;i++)assert.equal((await post('task-delete',{id})).status,200);
+ let visible=await state(env);assert.equal(visible.tasks.length,0);assert.equal(visible.removed.length,1);
+ assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM tasks').get().n,1,'keep the imported source record');
+ assert.deepEqual(sqlite.prepare('SELECT id FROM deliveries ORDER BY id').all().map(r=>r.id),['task:assign-1010:pending:device',`task:${id}:sent:device`]);
+ data.assignments[0].name='Updated university assignment';data.assignments[0].duedate+=3600;
+ data.statuses.set(1,{lastattempt:{submission:{status:'draft'}}});
+ await syncCourse(env,0);
+ visible=await state(env);assert.equal(visible.tasks.length,0);assert.equal(visible.removed[0].item.title,'Updated university assignment');assert.equal(visible.removed[0].item.status,'draft');
+ let now=data.assignments[0].duedate*1000-3600000;if(Math.floor(now/60000)%2===0)now+=60000;
+ await tick(env,now);
+ assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM deliveries WHERE id LIKE 'task:assign-101:%' AND sent IS NULL").get().n,0);
+ assert.equal((await post('task-status',{id,done:true})).status,400,'deletion does not permit changing university submission status');
+ sqlite.prepare("UPDATE content_scopes SET allowed=0 WHERE id='module:101'").run();
+ visible=await state(env);assert.equal(visible.tasks.length,0);assert.equal(visible.removed.length,0,'deleted records preserve group privacy');
+ assert.equal((await post('restore',{type:'task',id})).status,403);assert.equal((await post('task-delete',{id})).status,403);
+ sqlite.prepare("UPDATE content_scopes SET allowed=1 WHERE id='module:101'").run();
+ for(let i=0;i<2;i++)assert.equal((await post('restore',{type:'task',id})).status,200);
+ visible=await state(env);assert.equal(visible.removed.length,0);assert.equal(visible.tasks.length,1);
+ assert.equal(visible.tasks[0].title,'Updated university assignment');assert.equal(visible.tasks[0].status,'draft');assert.equal(visible.tasks[0].due,new Date(data.assignments[0].duedate*1000).toISOString());
+ await tick(env,now);
+ assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM deliveries WHERE id LIKE 'task:assign-101:%' AND sent IS NULL").get().n,1);
+ assert.equal(await setting(DB,'removed:task:'+id),undefined);
 });
