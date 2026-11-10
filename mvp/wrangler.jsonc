@@ -15,6 +15,15 @@
       "* * * * *"
     ]
   },
+  "queues": {
+    "producers": [
+      { "binding": "JOBS", "queue": "better-spectrum-local-jobs" },
+      { "binding": "DEAD_LETTER", "queue": "better-spectrum-local-failed" }
+    ],
+    "consumers": [
+      { "queue": "better-spectrum-local-jobs", "max_batch_size": 1, "max_batch_timeout": 1, "max_retries": 3, "max_concurrency": 2, "dead_letter_queue": "better-spectrum-local-failed" }
+    ]
+  },
   "d1_databases": [
     {
       "binding": "DB",

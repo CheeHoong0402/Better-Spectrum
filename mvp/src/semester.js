@@ -1,3 +1,4 @@
+import {ownerSQL} from './tenant.js';
 import {digest} from './security.js';
 
 const dayMs=86400000;
@@ -87,7 +88,7 @@ export function planSemester(definition,classes,occurrences){
 
 async function snapshot(db,input){
  const definition=validateSemester(input);
- const [semester,classes,links]=await Promise.all([db.prepare('SELECT * FROM semesters WHERE id=?').bind(definition.id).first(),db.prepare('SELECT * FROM classes ORDER BY id').all(),db.prepare('SELECT * FROM class_occurrences ORDER BY class_id').all()]);
+ const [semester,classes,links]=await Promise.all([db.prepare(`${ownerSQL} SELECT * FROM (SELECT * FROM semesters WHERE user_id=(SELECT id FROM owner)) semesters WHERE id=?2`).bind(definition.id).first(),db.prepare(`${ownerSQL} SELECT * FROM (SELECT * FROM classes WHERE user_id=(SELECT id FROM owner)) classes ORDER BY id`).all(),db.prepare(`${ownerSQL} SELECT * FROM (SELECT * FROM class_occurrences WHERE user_id=(SELECT id FROM owner)) class_occurrences ORDER BY class_id`).all()]);
  if((semester?.revision||0)!==definition.revision)fail('This semester changed. Reopen it before saving.');
  const plan=planSemester(definition,classes.results,links.results);
  const token=await digest(JSON.stringify({definition,classes:classes.results,links:links.results}));
@@ -102,22 +103,20 @@ export async function applySemester(db,input,token){
  if(token!==saved.token)fail('Your timetable changed after the preview. Preview it again before saving.');
  const {definition:d,plan}=saved;
  const changed=JSON.stringify([...plan.remove,...plan.writes.map(c=>c.id)]);
- const statements=[db.prepare('INSERT INTO semesters (id,definition,revision) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET definition=excluded.definition,revision=CASE WHEN semesters.revision=? THEN excluded.revision ELSE NULL END').bind(d.id,JSON.stringify(d),d.revision+1,d.revision)];
- statements.push(db.prepare("DELETE FROM deliveries WHERE sent IS NULL AND EXISTS (SELECT 1 FROM json_each(?) changed WHERE substr(deliveries.id,1,length(changed.value)+7)='class:'||changed.value||':')").bind(changed));
- statements.push(db.prepare('DELETE FROM classes WHERE id IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM class_occurrences o WHERE o.class_id=classes.id AND o.overridden=0 AND o.cancelled=0)').bind(JSON.stringify(plan.remove)));
- statements.push(db.prepare('DELETE FROM class_occurrences WHERE class_id IN (SELECT value FROM json_each(?)) AND overridden=0 AND cancelled=0').bind(JSON.stringify(plan.remove)));
- statements.push(db.prepare(`INSERT INTO classes (id,course,kind,starts,ends,room,occ,source,reminder_minutes)
- SELECT json_extract(j.value,'$.id'),json_extract(j.value,'$.course'),json_extract(j.value,'$.kind'),json_extract(j.value,'$.starts'),json_extract(j.value,'$.ends'),json_extract(j.value,'$.room'),json_extract(j.value,'$.occ'),json_extract(j.value,'$.source'),json_extract(j.value,'$.reminder_minutes') FROM json_each(?) j
- WHERE NOT EXISTS (SELECT 1 FROM class_occurrences o WHERE o.class_id=json_extract(j.value,'$.id') AND (o.overridden=1 OR o.cancelled=1))
- ON CONFLICT(id) DO UPDATE SET course=excluded.course,kind=excluded.kind,starts=excluded.starts,ends=excluded.ends,room=excluded.room,occ=excluded.occ,source=excluded.source,reminder_minutes=excluded.reminder_minutes`).bind(JSON.stringify(plan.writes)));
- statements.push(db.prepare(`INSERT INTO class_occurrences (class_id,semester_id,series_id,date,overridden)
- SELECT json_extract(value,'$.class_id'),json_extract(value,'$.semester_id'),json_extract(value,'$.series_id'),json_extract(value,'$.date'),json_extract(value,'$.overridden') FROM json_each(?) WHERE 1
- ON CONFLICT(class_id) DO NOTHING`).bind(JSON.stringify(plan.links)));
+ const statements=[db.prepare(`${ownerSQL} INSERT INTO semesters (user_id,id,definition,revision) VALUES ((SELECT id FROM owner),?2,?3,?4) ON CONFLICT(user_id,id) DO UPDATE SET definition=excluded.definition,revision=CASE WHEN semesters.revision=?5 THEN excluded.revision ELSE NULL END`).bind(d.id,JSON.stringify(d),d.revision+1,d.revision)];
+ statements.push(db.prepare(`${ownerSQL} DELETE FROM deliveries WHERE user_id=(SELECT id FROM owner) AND (sent IS NULL AND EXISTS (SELECT 1 FROM json_each(?2) changed WHERE substr(deliveries.id,1,length(changed.value)+7)='class:'||changed.value||':')) `).bind(changed));
+ statements.push(db.prepare(`${ownerSQL} DELETE FROM classes WHERE user_id=(SELECT id FROM owner) AND (id IN (SELECT value FROM json_each(?2)) AND EXISTS (SELECT 1 FROM (SELECT * FROM class_occurrences WHERE user_id=(SELECT id FROM owner)) o WHERE o.class_id=classes.id AND o.overridden=0 AND o.cancelled=0)) `).bind(JSON.stringify(plan.remove)));
+ statements.push(db.prepare(`${ownerSQL} DELETE FROM class_occurrences WHERE user_id=(SELECT id FROM owner) AND (class_id IN (SELECT value FROM json_each(?2)) AND overridden=0 AND cancelled=0) `).bind(JSON.stringify(plan.remove)));
+ statements.push(db.prepare(`${ownerSQL} INSERT INTO classes (user_id,id,course,kind,starts,ends,room,occ,source,reminder_minutes) SELECT (SELECT id FROM owner),json_extract(j.value,'$.id'),json_extract(j.value,'$.course'),json_extract(j.value,'$.kind'),json_extract(j.value,'$.starts'),json_extract(j.value,'$.ends'),json_extract(j.value,'$.room'),json_extract(j.value,'$.occ'),json_extract(j.value,'$.source'),json_extract(j.value,'$.reminder_minutes') FROM json_each(?2) j
+ WHERE NOT EXISTS (SELECT 1 FROM (SELECT * FROM class_occurrences WHERE user_id=(SELECT id FROM owner)) o WHERE o.class_id=json_extract(j.value,'$.id') AND (o.overridden=1 OR o.cancelled=1))
+ ON CONFLICT(user_id,id) DO UPDATE SET course=excluded.course,kind=excluded.kind,starts=excluded.starts,ends=excluded.ends,room=excluded.room,occ=excluded.occ,source=excluded.source,reminder_minutes=excluded.reminder_minutes`).bind(JSON.stringify(plan.writes)));
+ statements.push(db.prepare(`${ownerSQL} INSERT INTO class_occurrences (user_id,class_id,semester_id,series_id,date,overridden) SELECT (SELECT id FROM owner),json_extract(value,'$.class_id'),json_extract(value,'$.semester_id'),json_extract(value,'$.series_id'),json_extract(value,'$.date'),json_extract(value,'$.overridden') FROM json_each(?2) WHERE 1
+ ON CONFLICT(user_id,class_id) DO NOTHING`).bind(JSON.stringify(plan.links)));
  const catalog=[...new Map(d.series.map(s=>[s.course,{code:s.course,name:s.name}])).values()];
- statements.push(db.prepare(`INSERT INTO settings (key,value) VALUES ('course_catalog',?) ON CONFLICT(key) DO UPDATE SET value=(
+ statements.push(db.prepare(`${ownerSQL} INSERT INTO user_settings (user_id,key,value) VALUES ((SELECT id FROM owner),'course_catalog',?2) ON CONFLICT(user_id,key) DO UPDATE SET value=(
  SELECT json_group_array(json(entry.value)) FROM (
- SELECT value FROM json_each(settings.value) UNION ALL
- SELECT fresh.value FROM json_each(excluded.value) fresh WHERE NOT EXISTS (SELECT 1 FROM json_each(settings.value) old WHERE json_extract(old.value,'$.code')=json_extract(fresh.value,'$.code'))
+ SELECT value FROM json_each(user_settings.value) UNION ALL
+ SELECT fresh.value FROM json_each(excluded.value) fresh WHERE NOT EXISTS (SELECT 1 FROM json_each(user_settings.value) old WHERE json_extract(old.value,'$.code')=json_extract(fresh.value,'$.code'))
  ) entry)`).bind(JSON.stringify(catalog)));
  await db.batch(statements);
  return {ok:true,counts:plan.counts};

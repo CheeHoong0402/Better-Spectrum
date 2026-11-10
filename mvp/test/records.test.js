@@ -1,9 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {database} from '../test-support/db.js';
+import {database,testEnvironment} from '../test-support/db.js';
 import {updateTask,removeRecord,restoreRecord,removedRecords} from '../src/records.js';
 import {previewSemester,applySemester} from '../src/semester.js';
-import {tick} from '../src/worker.js';
+import {reminders as tick} from '../src/worker.js';
 
 test('manual deadline editing preserves status, rejects stale edits and imported changes, and clears obsolete pending reminders',async()=>{
  const {DB,sqlite}=database();
@@ -27,14 +27,14 @@ test('undo removal restores the same deadline and eligible reminders without rep
  const {DB,sqlite}=database(),now=Date.parse('2030-01-01T01:00:00Z');
  try{
   sqlite.prepare('INSERT INTO tasks (id,course,title,due) VALUES (?,?,?,?)').run('task','TEST','Deadline','2030-01-01T02:00:00.000Z');
-  sqlite.prepare('INSERT INTO subscriptions VALUES (?,?)').run('device','{}');
-  await tick({DB},now);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get().n,1);
+  sqlite.prepare('INSERT OR REPLACE INTO subscriptions (id,value) VALUES (?,?)').run('device','{}');
+  await tick(testEnvironment(DB),now);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get().n,1);
   await removeRecord(DB,'task','task');await removeRecord(DB,'task','task');
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get().n,0);assert.equal((await removedRecords(DB,[])).length,1);
-  await restoreRecord(DB,'task','task');await restoreRecord(DB,'task','task');await tick({DB},now);
+  await restoreRecord(DB,'task','task');await restoreRecord(DB,'task','task');await tick(testEnvironment(DB),now);
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM tasks').get().n,1);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get().n,1);
   sqlite.prepare("UPDATE deliveries SET sent='sent'").run();
-  await removeRecord(DB,'task','task');await restoreRecord(DB,'task','task');await tick({DB},now);
+  await removeRecord(DB,'task','task');await restoreRecord(DB,'task','task');await tick(testEnvironment(DB),now);
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get().n,1);assert.equal(sqlite.prepare('SELECT sent FROM deliveries').get().sent,'sent');
  }finally{sqlite.close();}
 });
@@ -77,7 +77,7 @@ test('failed imported deletion keeps its record, visibility and pending reminder
   sqlite.prepare("INSERT INTO content_scopes (id,course,allowed) VALUES ('module:1','TEST',1)").run();
   sqlite.prepare("INSERT INTO tasks (id,course,title,due,source) VALUES ('assign-1','TEST','Assignment','2030-01-01','SPeCTRUM')").run();
   sqlite.prepare("INSERT INTO deliveries (id,subscription_id,payload,due) VALUES ('task:assign-1:pending:device','device','{}','2030-01-01')").run();
-  sqlite.exec("CREATE TRIGGER fail_hide BEFORE INSERT ON settings WHEN NEW.key='removed:task:assign-1' BEGIN SELECT RAISE(ABORT,'test failure'); END;");
+  sqlite.exec("CREATE TRIGGER fail_hide BEFORE INSERT ON user_settings WHEN NEW.key='removed:task:assign-1' BEGIN SELECT RAISE(ABORT,'test failure'); END;");
   await assert.rejects(removeRecord(DB,'task','assign-1'),/test failure/);
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM tasks').get().n,1);
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get().n,1);

@@ -1,14 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {database} from '../test-support/db.js';
-import {seal,sign} from '../src/security.js';
+import {database,testCookie,testEnvironment,testWorker} from '../test-support/db.js';
+import {sealCredential} from '../src/security.js';
 import {setting,syncCourse} from '../src/moodle.js';
-import worker,{tick} from '../src/worker.js';
+import rawWorker,{reminders as tick} from '../src/worker.js';
+const worker=testWorker(rawWorker);
 
 const assignment=id=>({id,cmid:id+100,name:`Assignment ${id}`,duedate:1900000000+id});
 async function fixture(t,assignments=[assignment(1)],modules=[]){
- const {DB,sqlite}=database(),env={DB,AUTH_SECRET:'test-only'};
- await setting(DB,'moodle_token',await seal('test-token',env.AUTH_SECRET));
+ const {DB,sqlite}=database(),env=testEnvironment(DB,{AUTH_SECRET:'test-only'});
+ await setting(DB,'moodle_token',await sealCredential(env,'moodle_token','test-token'));
  await setting(DB,'courses',JSON.stringify([{id:1,code:'TEST101'}]));
  const data={assignments,modules,assignmentWarnings:[],courseCalls:[],statuses:new Map(),forumError:false,assignmentError:false,groupError:false,groups:[{id:10,name:'GROUP 10',idnumber:'2026@2027@1@10'}],sections:null,posts:new Map(),statusCalls:[],forumCalls:[]};
  const originalFetch=globalThis.fetch;
@@ -47,7 +48,7 @@ test('bounded checks rotate through every assignment and forum without first-imp
  assert.deepEqual(new Set(data.forumCalls),new Set([13,10,11]));
  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM tasks WHERE status='unknown'").get().n,0);
  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM updates').get().n,0);
- assert.match(sqlite.prepare("SELECT value FROM settings WHERE key='partial:1'").get().value,/TEST101:.*rotate/);
+ assert.match(sqlite.prepare("SELECT value FROM user_settings WHERE key='partial:1'").get().value,/TEST101:.*rotate/);
  data.posts.get(10)[0].message='Changed content';
  const events=await syncCourse(env,0);assert.equal(events.length,1);assert.equal(events[0].kind,'announcement');
  assert.deepEqual(await syncCourse(env,0),[]);
@@ -98,18 +99,15 @@ test('normal submission batching keeps earlier statuses without a partial-sync w
  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM tasks WHERE status='unknown'").get().n,0);
 });
 
-test('manual course checks rotate, including after a failed check',async t=>{
+test('manual course checks queue each course without running university requests inline',async t=>{
  const {env,DB,data}=await fixture(t,[]);
  await setting(DB,'courses',JSON.stringify([{id:1,code:'TEST101'},{id:2,code:'TEST102'}]));
- const expiry=String(Date.now()+60000),cookie=`sm_session=${expiry}.${await sign(expiry,env.AUTH_SECRET)}`;
+ const expiry=String(Date.now()+60000),cookie=await testCookie(env.DB);
  const check=()=>worker.fetch(new Request('https://test.example/api/sync',{method:'POST',headers:{Origin:'https://test.example','Content-Type':'application/json',Cookie:cookie},body:'{}'}),{...env,APP_PASSWORD:'test'});
  assert.equal((await check()).status,200);
- data.groupError=true;
- assert.equal((await check()).status,500);
- data.groupError=false;
  assert.equal((await check()).status,200);
- assert.equal((await check()).status,200);
- assert.deepEqual(data.courseCalls,[1,2,1,2]);
+ assert.deepEqual(data.courseCalls,[]);
+ assert.deepEqual((await env.database.prepare('SELECT target FROM jobs ORDER BY target').all()).results.map(r=>r.target),['1','2']);
 });
 
 test('incomplete submission responses remain unverified and team drafts remain unfinished',async t=>{
@@ -145,7 +143,7 @@ test('expired access does not advance sync timestamps or destroy saved tasks',as
 });
 
 async function state(env){
- const expiry=String(Date.now()+60000),cookie=`sm_session=${expiry}.${await sign(expiry,env.AUTH_SECRET)}`;
+ const expiry=String(Date.now()+60000),cookie=await testCookie(env.DB);
  const r=await worker.fetch(new Request('https://test.example/api/state',{headers:{Cookie:cookie}}),{...env,APP_PASSWORD:'test'});
  assert.equal(r.status,200);return r.json();
 }
@@ -191,10 +189,10 @@ test('group lookup failure preserves existing data and pauses imports with an ex
 test('deleting an imported deadline survives sync, stops reminders and restores current university details',async t=>{
  const {env,DB,sqlite,data}=await fixture(t);
  await syncCourse(env,0);
- const expiry=String(Date.now()+60000),cookie=`sm_session=${expiry}.${await sign(expiry,env.AUTH_SECRET)}`;
+ const expiry=String(Date.now()+60000),cookie=await testCookie(env.DB);
  const post=(path,body)=>worker.fetch(new Request('https://test.example/api/'+path,{method:'POST',headers:{Origin:'https://test.example','Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(body)}),{...env,APP_PASSWORD:'test'});
  const id='assign-101';
- sqlite.prepare('INSERT INTO subscriptions VALUES (?,?)').run('device','{}');
+ sqlite.prepare('INSERT OR REPLACE INTO subscriptions (id,value) VALUES (?,?)').run('device','{}');
  for(const [key,sent] of [[`task:${id}:pending:device`,null],[`task:${id}:sent:device`,'sent'],['task:assign-1010:pending:device',null]])sqlite.prepare('INSERT INTO deliveries (id,subscription_id,payload,due,sent) VALUES (?,?,?,?,?)').run(key,'device','{}','2026-01-01',sent);
  for(let i=0;i<2;i++)assert.equal((await post('task-delete',{id})).status,200);
  let visible=await state(env);assert.equal(visible.tasks.length,0);assert.equal(visible.removed.length,1);

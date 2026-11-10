@@ -45,6 +45,8 @@ jobs:
       D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
       WORKER_NAME: ${{ vars.WORKER_NAME }}
       PLANNER_URL: ${{ vars.PLANNER_URL }}
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -27,3 +27,10 @@ test('a failed storage write cannot replace newer in-memory edits with an older 
  assert.equal(vm.runInContext("readDraft('editor:task:new').title",context),'Latest text');
  assert.equal(vm.runInContext('draftsNeedWarning()',context),true);
 });
+test('drafts survive reload for the same account and are discarded when another account signs in',()=>{
+ const sessionStorage=storage(),first=vm.createContext({sessionStorage,structuredClone});vm.runInContext(source,first);
+ vm.runInContext("setDraftUser('a');writeDraft('editor:task:new',{title:'Private A'})",first);
+ const reloaded=vm.createContext({sessionStorage,structuredClone});vm.runInContext(source,reloaded);vm.runInContext("setDraftUser('a')",reloaded);
+ assert.equal(vm.runInContext("readDraft('editor:task:new').title",reloaded),'Private A');vm.runInContext("setDraftUser('b')",reloaded);assert.equal(vm.runInContext("readDraft('editor:task:new')",reloaded),null);
+ assert.equal(sessionStorage.getItem('planner-draft:a:editor:task:new'),null);
+});

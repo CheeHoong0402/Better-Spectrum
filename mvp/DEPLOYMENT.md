@@ -1,5 +1,7 @@
 # Production deployment
 
+The multi-user release requires the reviewed [maintenance migration](MULTI_USER_MIGRATION.md). Normal deployment refuses a legacy database. Do not apply `schema.sql` over the live single-user app or roll back to ownerless code after other users start writing.
+
 ## One-time GitHub setup
 
 The workflow uses these repository Actions variables:
@@ -8,6 +10,7 @@ The workflow uses these repository Actions variables:
 - `D1_DATABASE_ID`: the existing production database UUID.
 - `CLOUDFLARE_ACCOUNT_ID`: the account containing both resources.
 - `PLANNER_URL`: the existing HTTPS application origin.
+- `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`: the configured email-login project, with a tested production sender and code template.
 
 Add an Actions **secret** named `CLOUDFLARE_API_TOKEN`. Use a dedicated Cloudflare API token restricted to the account, with Workers Scripts Edit and D1 Edit permissions; account discovery may require Account Settings Read. Do not upload the desktop OAuth login or application passphrase. The token is for deployment, not for users signing in to the planner.
 
@@ -37,7 +40,7 @@ Commit the working tree, then:
 npm run deploy
 ```
 
-This runs checks and tests, builds a release, records the previous Cloudflare deployment, makes and verifies a private logical SQL backup, applies the additive schema and migrations, deploys the Worker with its Git identifier, and checks the public URL. GitHub performs the same release after its separate check job succeeds.
+This runs checks and tests, builds a release, records the previous Cloudflare deployment, verifies the multi-user database and active owner identity, makes a foreign-key-verified backup, applies pending migrations, deploys the Worker with its Git identifier, and checks the public URL. The initial ownership migration is a separate maintenance operation. GitHub performs normal releases after its separate check job succeeds.
 
 The live check retries while Cloudflare propagates the deployment. Acceptance by the upload API alone is not treated as a verified release. `/api/version` returns only the release identifier; `/api/state` remains private. About also shows the identifier after sign-in.
 
@@ -48,10 +51,10 @@ Local backups are in `.private/backups/` and previous deployment information is 
 The GitHub deployment summary records previous Cloudflare version IDs. From `main`, run the **Roll back production** workflow with one of those IDs. Or, with your local production configuration:
 
 ```text
-npx wrangler rollback PREVIOUS_VERSION_ID --config wrangler.production.jsonc --yes
+node scripts/rollback.mjs PREVIOUS_VERSION_ID
 ```
 
-This rolls back application code, not database records. The semester migration only adds tables and an index; older application versions can continue to read the original tables. Do not automatically restore a database over newer user edits. Use a reviewed D1 Time Travel restore or a private SQL backup if data recovery is necessary.
+This rolls back application code, not database records. After migration 0004, only a multi-user-compatible version may be used. Ownerless releases cannot read the new schema safely. Do not automatically restore a database over newer user edits. Use a reviewed D1 Time Travel restore or a private SQL backup if data recovery is necessary.
 
 ## Existing owner's course catalogue
 

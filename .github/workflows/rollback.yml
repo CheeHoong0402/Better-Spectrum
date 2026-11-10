@@ -23,6 +23,8 @@ jobs:
       D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
       WORKER_NAME: ${{ vars.WORKER_NAME }}
       PLANNER_URL: ${{ vars.PLANNER_URL }}
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       ROLLBACK_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -33,4 +35,4 @@ jobs:
       - run: node scripts/production-config.mjs
       - name: Validate version ID
         run: node -e 'if(!/^[a-f0-9-]{36}$/.test(process.env.ROLLBACK_VERSION))process.exit(1)'
-      - run: npx wrangler rollback "$ROLLBACK_VERSION" --config wrangler.production.jsonc --yes
+      - run: node scripts/rollback.mjs "$ROLLBACK_VERSION"

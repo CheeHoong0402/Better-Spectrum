@@ -1,3 +1,4 @@
+import {ownerSQL} from './tenant.js';
 export function groupNumbers(text,plainGroup=false){
  const label=String(text||'').replace(/&amp;|&#38;|&#x26;/gi,'&').replace(/&nbsp;|&#160;|&#xa0;/gi,' ').replace(/[–—]/g,'-').replace(/<[^>]*>/g,' ').slice(0,1000);
  const prefix=plainGroup?'OCC(?:URRENCE)?S?(?:\\s*\\/\\s*GROUP)?|TUTORIAL\\s+GROUP|GROUP|T':'OCC(?:URRENCE)?S?(?:\\s*\\/\\s*GROUP)?|TUTORIAL\\s+GROUP|T';
@@ -48,5 +49,5 @@ export function courseScope(sections,numbers,config={}){
 }
 
 export async function allowedScope(DB,id){
- return !!await DB.prepare('SELECT s.id FROM content_scopes s LEFT JOIN content_scopes p ON p.id=s.parent_id WHERE s.id=? AND s.allowed=1 AND (s.parent_id IS NULL OR p.allowed=1)').bind(id).first();
+ return !!await DB.prepare(`${ownerSQL} SELECT s.id FROM (SELECT * FROM content_scopes WHERE user_id=(SELECT id FROM owner)) s LEFT JOIN (SELECT * FROM content_scopes WHERE user_id=(SELECT id FROM owner)) p ON p.id=s.parent_id WHERE s.id=?2 AND s.allowed=1 AND (s.parent_id IS NULL OR p.allowed=1)`).bind(id).first();
 }

@@ -1,12 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {database} from '../test-support/db.js';
-import {seal,unseal} from '../src/security.js';
+import {database,testEnvironment,testWorker} from '../test-support/db.js';
+import {sealCredential,unsealCredential} from '../src/security.js';
 import {setting} from '../src/moodle.js';
 import {pairAttendance,acceptAttendanceHandoff,renewAttendance,refreshAttendance,parseAttendanceQr,connectAttendanceQr} from '../src/attendance.js';
 import {parseCallback} from '../scripts/attendance-helper.mjs';
-import worker from '../src/worker.js';
+import rawWorker from '../src/worker.js';
+const worker=testWorker(rawWorker);
 
 const token='a'.repeat(32),privateToken='b'.repeat(32),passport='one-use-passport';
 function callback(parts){return 'betterspectrum-attendance://token='+encodeURIComponent(Buffer.from(parts.join(':::')).toString('base64'));}
@@ -19,8 +20,8 @@ test('Windows callback validates the launch passport, exact scheme and private t
  assert.throws(()=>parseCallback(callback([siteid,token,privateToken,'extra']),passport),/private token/);
 });
 async function fixture(t){
- const {DB,sqlite}=database(),env={DB,AUTH_SECRET:'test-only',APP_PASSWORD:'test-only'};
- await setting(DB,'moodle_token',await seal('existing-token',env.AUTH_SECRET));await setting(DB,'courses',JSON.stringify([{id:1,code:'WIA1007'}]));
+ const {DB,sqlite}=database(),env=testEnvironment(DB,{AUTH_SECRET:'test-only'});
+ await setting(DB,'moodle_token',await sealCredential(env,'moodle_token','existing-token'));await setting(DB,'courses',JSON.stringify([{id:1,code:'WIA1007'}]));
  const previous=globalThis.fetch,requests=[];let userid=42,deny=false;
  globalThis.fetch=async(url,options={})=>{
   requests.push({url:String(url),fn:options.body?.get?.('wsfunction'),method:options.method});
@@ -45,10 +46,10 @@ test('pairing is one-use, checks the account, verifies a read-only report, and l
  const f=await fixture(t),pair=await pairAttendance(f.env);const data={code:pair.code,token,privateToken};
  const response=await worker.fetch(new Request('https://planner.test/api/attendance-handoff',{method:'POST',headers:{Origin:'https://planner.test','Content-Type':'application/json'},body:JSON.stringify(data)}),f.env);
  assert.equal(response.status,200);const result=await response.json();assert.equal(result.enabled,false);assert.equal(result.verified.rows,1);
- const saved=JSON.parse(await unseal(await setting(f.DB,'attendance_mobile'),f.env.AUTH_SECRET));assert.equal(saved.privateToken,privateToken);
+ const saved=JSON.parse(await unsealCredential(f.env,'attendance_mobile',await setting(f.DB,'attendance_mobile')));assert.equal(saved.privateToken,privateToken);
  assert.equal(await setting(f.DB,'attendance_enabled'),'0');assert.equal(await setting(f.DB,'attendance_connection'),'Connected');
  assert.ok(!f.requests.some(r=>/\/attendance\.php/.test(r.url)));
- assert.ok(!JSON.stringify(f.sqlite.prepare('SELECT * FROM settings').all()).includes(privateToken));
+ assert.ok(!JSON.stringify(f.sqlite.prepare('SELECT * FROM user_settings').all()).includes(privateToken));
  await assert.rejects(()=>acceptAttendanceHandoff(f.env,data),/already used/);
 });
 test('wrong account, expired or replaced codes cannot establish a connection',async t=>{
@@ -56,7 +57,7 @@ test('wrong account, expired or replaced codes cannot establish a connection',as
  await assert.rejects(()=>acceptAttendanceHandoff(f.env,{code:old.code,token,privateToken}),/expired/);
  f.setUser(43);await assert.rejects(()=>acceptAttendanceHandoff(f.env,{code:pair.code,token,privateToken}),/same student/);
  assert.equal(await setting(f.DB,'attendance_mobile'),undefined);assert.equal(f.requests.filter(r=>r.fn==='tool_mobile_get_autologin_key').length,0);
- const current=await pairAttendance(f.env),raw=JSON.parse(await setting(f.DB,'attendance_pair'));raw.expires=0;await setting(f.DB,'attendance_pair',JSON.stringify(raw));
+ const current=await pairAttendance(f.env);f.sqlite.exec('UPDATE attendance_pairings SET expires=0');
  await assert.rejects(()=>acceptAttendanceHandoff(f.env,{code:current.code,token,privateToken}),/expired/);
 });
 test('denied auto-login is bounded, and pairing endpoints retain normal authentication and origin checks',async t=>{
@@ -70,14 +71,14 @@ test('denied auto-login is bounded, and pairing endpoints retain normal authenti
 
 test('a cancelled handoff cannot save a connection after verification has started',async t=>{
  const f=await fixture(t),pair=await pairAttendance(f.env),previous=globalThis.fetch;
- globalThis.fetch=async(url,options)=>{if(String(url).includes('/mod/attendance/view.php'))await f.DB.prepare("DELETE FROM settings WHERE key='attendance_pair'").run();return previous(url,options);};
+ globalThis.fetch=async(url,options)=>{if(String(url).includes('/mod/attendance/view.php'))await f.env.database.prepare('DELETE FROM attendance_pairings').run();return previous(url,options);};
  await assert.rejects(()=>acceptAttendanceHandoff(f.env,{code:pair.code,token,privateToken}),/cancelled or replaced/);
  assert.equal(await setting(f.DB,'attendance_mobile'),undefined);assert.equal(await setting(f.DB,'attendance_cookie'),undefined);
 });
 
 test('expired report sessions renew through the saved mobile connection without visiting marking pages',async t=>{
  const f=await fixture(t),pair=await pairAttendance(f.env);await acceptAttendanceHandoff(f.env,{code:pair.code,token,privateToken});
- await setting(f.DB,'attendance_renew_after',0);await setting(f.DB,'attendance_cookie',await seal(JSON.stringify([['MoodleSession','expired']]),f.env.AUTH_SECRET));
+ await setting(f.DB,'attendance_renew_after',0);await setting(f.DB,'attendance_cookie',await sealCredential(f.env,'attendance_cookie',JSON.stringify([['MoodleSession','expired']])));
  const previous=globalThis.fetch;globalThis.fetch=async(url,options)=>options?.headers?.Cookie?.includes('expired')?new Response(null,{status:303,headers:{Location:'https://login.microsoftonline.com/university'}}):previous(url,options);
  await refreshAttendance(f.env,1);assert.equal(f.requests.filter(r=>r.fn==='tool_mobile_get_autologin_key').length,2);assert.ok(!f.requests.some(r=>/\/attendance\.php/.test(r.url)));
 });

@@ -52,7 +52,9 @@ export function bindNotifications(state,{api,load,action,toast}){
    const permission=await window.Notification.requestPermission();if(permission!=='granted')throw Error('Allow notifications in your device settings.');
    const reg=await navigator.serviceWorker.getRegistration();if(!reg?.active)throw Error('Refresh the app and try again.');
    const raw=atob(state.pushKey.replace(/-/g,'+').replace(/_/g,'/')),key=Uint8Array.from(raw,c=>c.charCodeAt(0));
-   const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+   let sub=await reg.pushManager.getSubscription();
+   if(sub&&device.status!=='enabled'){await sub.unsubscribe();sub=null;}
+   sub||=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
    await api('subscribe',sub.toJSON());
   }else if(device.sub){await api('unsubscribe',{endpoint:device.sub.endpoint});await device.sub.unsubscribe();}
  };

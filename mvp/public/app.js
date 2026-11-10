@@ -3,7 +3,7 @@ import {notificationPanel,notificationSwitch,bindNotifications} from './notifica
 import {attendanceSwitch,attendanceConnection,bindAttendance} from './attendance.js';
 import {semesterView,bindSemester,resetSemesterDraft} from './semester.js';
 import {timetableView,applyTimetableLayout,updateTimetableClock,semesterForDate,weekLayout} from './timetable.js';
-import {readDraft,writeDraft,deleteDraft,clearDrafts,draftsNeedWarning} from './drafts.js';
+import {readDraft,writeDraft,deleteDraft,clearDrafts,draftsNeedWarning,setDraftUser} from './drafts.js';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state,week=0,filter='all',taskFilter='active',updateFilter='material',timetableMode='auto',busy=false;
 let agendaDay,timetableDay,pendingAdd,saving=false,editorKey,removal;
@@ -29,17 +29,34 @@ function editorConflict(){
  const conflict=form.elements.edit.value==='yes'&&item&&fields(item)!==fields(JSON.parse(form.elements.original.value||'{}'));
  $('#editor-conflict').hidden=!conflict;$('#save-editor').disabled=!!conflict;return conflict;
 }
+let identity=null,identityEpoch=0;
+const requests=new Set(),accountChannel=typeof BroadcastChannel==='function'?new BroadcastChannel('planner-account'):null;
+function resetIdentity(){
+ identityEpoch++;for(const request of requests)request.abort();requests.clear();
+ clearDrafts();setDraftUser(null);resetSemesterDraft();identity=null;state=null;editorKey=null;pendingAdd=null;removal=null;
+ week=0;filter='all';taskFilter='active';updateFilter='material';agendaDay=null;timetableDay=null;
+ for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();
+ $('#editor-form').reset();$('#view').innerHTML='';$('#course-list').innerHTML='';$('#detail-content').innerHTML='';$('#toast').hidden=true;
+ $('#editor-form').elements.course.innerHTML='';$('#connection-strip').innerHTML='';$('#remove-message').textContent='';$('#setup-intent').textContent='';$('#toast').textContent='';$('#action-status').textContent='';$('#action-status').hidden=true;
+ $('#app').hidden=true;$('#load-status').hidden=true;$('#login').hidden=false;
+ $('#code-step').hidden=true;$('#login-code').required=false;$('#login-code').value='';$('#login-submit').textContent='Send sign-in code';
+}
 async function api(path,data){
- let r;try{r=await fetch('/api/'+path,{...(data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:['state','tasks','task-update','classes','push-status','deliveries'].includes(path)?AbortSignal.timeout(30000):undefined});}catch{throw new Error('Could not reach your planner. Check your connection and try again.');}
+ const epoch=identityEpoch,controller=new AbortController();requests.add(controller);
+ let r;try{r=await fetch('/api/'+path,{headers:{'Content-Type':'application/json',...(identity?{'X-Planner-User':identity.id}:{})},...(data===undefined?{}:{method:'POST',body:JSON.stringify(data)}),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])});}
+ catch{if(epoch!==identityEpoch)throw Object.assign(new Error('The signed-in account changed.'),{status:401});throw new Error('Could not reach your planner. Check your connection and try again.');}
+ finally{requests.delete(controller);}
+ if(epoch!==identityEpoch)throw Object.assign(new Error('The signed-in account changed.'),{status:401});
  let v;try{v=await r.json();}catch{throw new Error('Your planner returned an unexpected response. Please try again.');}
+ if(epoch!==identityEpoch)throw Object.assign(new Error('The signed-in account changed.'),{status:401});
  if(!r.ok){
-  if(r.status===401){const hadState=!!state;state=null;$('#app').hidden=true;$('#load-status').hidden=true;$('#login').hidden=false;if(v.loginMethod){$('#login-form').hidden=v.loginMethod==='spectrum';$('#spectrum-signin').hidden=v.loginMethod!=='spectrum';}$('#login-error').textContent=path==='state'&&!hadState?'':v.error||'Sign in to continue.';for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();}
-  throw Object.assign(new Error(v.error||'The request failed. Please try again.'),{status:r.status});
+  if(r.status===401||v.identityChanged){resetIdentity();$('#login-error').textContent=path==='me'?'':v.error||'Sign in to continue.';}
+  throw Object.assign(new Error(v.error||'The request failed. Please try again.'),{status:v.identityChanged?401:r.status});
  }return v;
 }
 async function load(saved=false){
  const retry=$('#retry-load');retry.disabled=true;
- try{state=await api('state');$('#login').hidden=true;$('#app').hidden=false;$('#load-status').hidden=true;render();
+ try{if(!identity){const me=await api('me');identity=me.user;setDraftUser(identity.id);}state=await api('state');$('#login').hidden=true;$('#app').hidden=false;$('#load-status').hidden=true;render();
   if(pendingAdd&&state.courses.length){const type=pendingAdd;pendingAdd=null;$('#course-setup').close();editor(type);}
   if($('#editor').open)editorConflict();return true;
  }catch(e){
@@ -122,7 +139,7 @@ function settings(){
  const pages={
   notifications:{title:'Notifications',content:notificationPanel()},
   connection:{title:'SPeCTRUM connection',content:`<section class="panel"><h2>Course sync</h2><p>${esc(state.connection)}</p><p class="subtle">${state.lastSync?'Last check: '+esc(fmt(state.lastSync)):'No course checks yet.'}</p><p class="subtle">Courses and submission statuses are checked in rotation. Some results may be from an earlier check.</p><form id="connect-form"><label>Mobile access token<input type="password" name="token" autocomplete="off" required></label><button class="primary">Connect courses</button></form><div class="actions"><button id="sync">Check next course now</button><button id="disconnect">Disconnect courses</button></div>${state.partial.map(p=>`<p class="notice">${esc(p.value)}</p>`).join('')}</section>`+attendanceConnection(state,{esc})},
-  account:{title:'Account',content:`<section class="panel"><h2>Private access</h2><p class="subtle">Cloud reminder service: ${state.lastTick?'last checked '+esc(fmt(state.lastTick)):'not yet observed running'}</p><button id="logout">Sign out</button></section>`},
+  account:{title:'Account',content:`<section class="panel"><h2>Your account</h2><p>${esc(state.user?.email||'')}</p><p class="subtle">Cloud reminder service: ${state.lastTick?'last checked '+esc(fmt(state.lastTick)):'not yet observed running'}</p><button id="logout">Sign out</button></section>`},
   about:{title:'About',content:`<section class="panel"><h2>Better Spectrum</h2><p>Release ${esc(state.release||'development')}</p><p>All dates and times use Malaysia time (MYT). Saved class and deadline reminders are handled by the cloud service.</p><p>Live SPeCTRUM collection requires a supported access token. Attendance auto-marking is optional and follows matching saved class times when enabled. WIX1003 stays manual.</p></section>`},
   help:{title:'Help',content:`<section class="panel"><h2>Using your planner</h2><h3>Phone reminders</h3><p>On iPhone, open the app in Safari, choose Share → Add to Home Screen, and open the installed app. In Settings, enable Notifications. <a href="#settings/notifications">Test notifications →</a></p><h3>Courses and deadlines</h3><p>Connect a supported Moodle mobile token under SPeCTRUM connection. You can add deadlines manually from Today or Deadlines.</p><h3>Attendance</h3><p>WIX1003 and sessions requiring a password, QR code or campus network stay manual. Turn off auto-marking when you will not attend.</p><h3>Something not working?</h3><p>Check the connection status under SPeCTRUM connection and delivery status under Notifications.</p></section>`}
  };
@@ -173,7 +190,7 @@ function bind(){
  $('#connect-form')?.addEventListener('submit',e=>{e.preventDefault();const token=new FormData(e.target).get('token');action(async()=>{await api('connect',{token});await load();toast('Connected. Courses will be checked in rotation.');});});
  $('#sync')?.addEventListener('click',()=>action(async()=>{await api('sync',{});await load();toast('Next course checked. Background course checks continue automatically.');}));
  $('#disconnect')?.addEventListener('click',()=>action(async()=>{await api('disconnect',{});await load();toast('Disconnected. Saved timetable and task reminders remain available.');}));
- $('#logout')?.addEventListener('click',()=>action(async()=>{await api('logout',{});clearDrafts();resetSemesterDraft();editorKey=null;pendingAdd=null;$('#editor-form').reset();state=null;$('#app').hidden=true;$('#login').hidden=false;}));
+ $('#logout')?.addEventListener('click',()=>action(async()=>{await api('logout',{});resetIdentity();accountChannel?.postMessage('changed');}));
 }
 async function action(fn,control,label,retry=false){
  const activeControl=control||document.activeElement;
@@ -222,23 +239,22 @@ $('#retry-load').onclick=()=>load();
 $('#course-setup').querySelectorAll('a').forEach(a=>a.onclick=()=>$('#course-setup').close());
 $('#close-setup').onclick=()=>{pendingAdd=null;$('#course-setup').close();};
 $('#course-setup').addEventListener('cancel',()=>{pendingAdd=null;});
-$('#close-editor').onclick=()=>{captureEditor();$('#editor').close();};$('#login-form').addEventListener('submit',async e=>{e.preventDefault();try{await api('login',{password:$('#password').value});$('#password').value='';$('#login-error').textContent='';await load();}catch(e){$('#login-error').textContent=e.message;}});$('#refresh').onclick=()=>action(load);window.addEventListener('hashchange',()=>{if(state){render();window.scrollTo(0,0);document.querySelector('#view h1')?.focus({preventScroll:true});}});if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});load();
+$('#close-editor').onclick=()=>{captureEditor();$('#editor').close();};
+$('#login-form').addEventListener('submit',async e=>{
+ e.preventDefault();const button=$('#login-submit');if(button.disabled)return;button.disabled=true;$('#login-error').textContent='';
+ try{
+  if($('#code-step').hidden){const result=await api('auth/start',{email:$('#login-email').value});$('#code-step').hidden=false;$('#login-code').required=true;$('#login-submit').textContent='Verify code';$('#login-error').textContent=result.message;$('#login-code').focus();}
+  else{await api('auth/verify',{code:$('#login-code').value});$('#login-code').value='';resetIdentity();accountChannel?.postMessage('changed');await load();}
+ }catch(error){$('#login-error').textContent=error.message;}
+ finally{button.disabled=false;}
+});
+$('#change-email').onclick=()=>{$('#code-step').hidden=true;$('#login-code').required=false;$('#login-code').value='';$('#login-submit').textContent='Send sign-in code';};
+$('#refresh').onclick=()=>action(load);window.addEventListener('hashchange',()=>{if(state){render();window.scrollTo(0,0);document.querySelector('#view h1')?.focus({preventScroll:true});}});if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});load();
 
 $('#close-details').onclick=()=>$('#details').close();
 window.addEventListener('resize',()=>applyTimetableLayout());
 setInterval(()=>{if(!document.hidden)updateTimetableClock();},60000);
 
 
-let spectrumChallenge;
-$('#spectrum-login').onclick=async()=>{
- const button=$('#spectrum-login');if(button.disabled)return;
- if(!window.webkit?.messageHandlers?.spectrumLogin){$('#login-error').textContent='Open the Better Spectrum iPhone companion to sign in with SPeCTRUM.';return;}
- button.disabled=true;$('#login-error').textContent='';
- try{const flow=await api('spectrum-login-start',{});spectrumChallenge=flow.challenge;window.webkit.messageHandlers.spectrumLogin.postMessage({url:flow.url});}
- catch(error){$('#login-error').textContent=error.message;button.disabled=false;}
-};
-window.completeSpectrumLogin=async(callback)=>{
- try{if(!callback)throw new Error('Sign-in cancelled. You can try again.');await api('spectrum-login-finish',{challenge:spectrumChallenge,callback});spectrumChallenge=null;await load();}
- catch(error){$('#login-error').textContent=error.message;}
- finally{$('#spectrum-login').disabled=false;}
-};
+if(accountChannel)accountChannel.onmessage=()=>{resetIdentity();load();};
+window.addEventListener('focus',async()=>{if(!identity)return;try{const current=await api('me');if(current.user.id!==identity?.id){resetIdentity();await load();}}catch{}});

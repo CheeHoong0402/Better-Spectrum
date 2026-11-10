@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {database} from '../test-support/db.js';
-import {seal,digest} from '../src/security.js';
+import {database,testEnvironment} from '../test-support/db.js';
+import {sealCredential,digest} from '../src/security.js';
 import {setting} from '../src/moodle.js';
 import {checkAttendanceSupport,parseReport,sessionDate,simpleForm,attendanceTick,confirmAttendance,setAttendanceEnabled,connectAttendance,webSession,refreshAttendance,attendanceState,sessionWindow} from '../src/attendance.js';
 
@@ -36,9 +36,9 @@ test('automatic matching parses Malaysia session times and rejects unfamiliar or
  for(const label of ['Fri 6 Nov 2026','Fri 6 Nov 2026 13AM - 2PM','Fri 6 Nov 2026 10:99AM - 12PM','Fri 6 Nov 2026 11PM - 1AM','Mon 31 Feb 2026 10AM - 12PM','Fri 99 Nov 2026 10AM - 12PM'])assert.equal(sessionWindow(label),null);
 });
 async function fixture(t){
- const {DB,sqlite}=database(),env={DB,AUTH_SECRET:'test-only'},clock=Date.now;
+ const {DB,sqlite}=database(),env=testEnvironment(DB,{AUTH_SECRET:'test-only'}),clock=Date.now;
  const now=Date.parse('2026-11-04T04:01:00Z');Date.now=()=>now;
- await setting(DB,'attendance_enabled','1');await setting(DB,'attendance_connection','Connected');await setting(DB,'attendance_cookie',await seal(JSON.stringify([['MoodleSession','cookie']]),env.AUTH_SECRET));await setting(DB,'moodle_token',await seal('token',env.AUTH_SECRET));await setting(DB,'courses',JSON.stringify([{id:1,code:'WIA1007'}]));
+ await setting(DB,'attendance_enabled','1');await setting(DB,'attendance_connection','Connected');await setting(DB,'attendance_cookie',await sealCredential(env,'attendance_cookie',JSON.stringify([['MoodleSession','cookie']])));await setting(DB,'moodle_token',await sealCredential(env,'moodle_token','token'));await setting(DB,'courses',JSON.stringify([{id:1,code:'WIA1007'}]));
  sqlite.prepare('INSERT INTO classes (id,course,kind,starts,ends) VALUES (?,?,?,?,?)').run('class','WIA1007','Lecture','2026-11-04T04:00:00Z','2026-11-04T06:00:00Z');
  const id=await digest('100:'+parseReport(table())[0].key);
  sqlite.prepare('INSERT INTO attendance_sessions (id,course,course_id,cmid,name,row_key,day,label,checked) VALUES (?,?,?,?,?,?,?,?,?)').run(id,'WIA1007',1,100,'Lecture attendance',parseReport(table())[0].key,'2026-11-04','Wed 4 Nov 2026 12PM - 2PM',new Date(now).toISOString());
@@ -72,7 +72,7 @@ test('switch is off by default and cannot enable without a connection; disabling
  const f=await fixture(t);await confirmAttendance(f.env,{id:f.id,classId:'class'});await setAttendanceEnabled(f.env,false);
  assert.equal(f.sqlite.prepare('SELECT confirmed_class FROM attendance_sessions').get().confirmed_class,null);
  await attendanceTick(f.env,f.notify,f.now);assert.equal(f.state.calls.length,0);
- await f.DB.prepare("DELETE FROM settings WHERE key='attendance_connection'").run();await assert.rejects(()=>setAttendanceEnabled(f.env,true),/Connect attendance/);
+ await f.DB.prepare("DELETE FROM user_settings WHERE key='attendance_connection'").run();await assert.rejects(()=>setAttendanceEnabled(f.env,true),/Connect attendance/);
 });
 
 test('enabled auto-marking matches a current GUL1001 class and submits an inline form without confirmation',async t=>{
@@ -153,7 +153,7 @@ test('attendance sign-in verifies the same student and saves no password',async 
   return new Response('<input name="logintoken" value="csrf">');
  };
  await connectAttendance(f.env,{username:'student@example.test',password:'never-save-this'});
- assert.equal(await setting(f.DB,'attendance_enabled'),'0');assert.doesNotMatch(JSON.stringify(f.sqlite.prepare('SELECT * FROM settings').all()),/never-save-this|newcookie/);
+ assert.equal(await setting(f.DB,'attendance_enabled'),'0');assert.doesNotMatch(JSON.stringify(f.sqlite.prepare('SELECT * FROM user_settings').all()),/never-save-this|newcookie/);
  identity=11;await setting(f.DB,'attendance_login_after',0);await assert.rejects(()=>connectAttendance(f.env,{username:'other@example.test',password:'secret'}),/same student/);
 });
 

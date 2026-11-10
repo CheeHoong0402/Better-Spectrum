@@ -1,4 +1,9 @@
-const prefix='planner-draft:',memory=new Map();
+let prefix='planner-draft:unowned:';
+const memory=new Map();
+export function setDraftUser(userId){
+ memory.clear();prefix='planner-draft:'+(userId||'unowned')+':';
+ try{for(let i=sessionStorage.length-1;i>=0;i--){const key=sessionStorage.key(i);if(key.startsWith('planner-draft:')&&!key.startsWith(prefix))sessionStorage.removeItem(key);}}catch{storageAvailable=false;}
+}
 let storageAvailable=true;
 export function readDraft(key){
  if(memory.has(key))return structuredClone(memory.get(key));

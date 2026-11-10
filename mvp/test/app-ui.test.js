@@ -15,10 +15,10 @@ function app(){
   return nodes.get(s);
  };
  for(const k of ['type','id','edit','original','course','kind','room','occ','starts','ends','title','due','reminder_minutes'])node('#editor-form').elements[k]={value:'',innerHTML:''};
- const sandbox=vm.createContext({document:{querySelector:node,createElement:()=>node('created:'+nodes.size),querySelectorAll:s=>s==='dialog[open]'?[...nodes.values()].filter(n=>n.open):[],body:node('body')},window:{addEventListener(){},scrollTo(){}},navigator:{onLine:true},location:{hash:'#tasks'},fetch:()=>new Promise(()=>{}),setTimeout(){},clearTimeout(){},setInterval(){},AbortSignal,crypto,Date,Intl,URL,plainText,courseLabel,pendingTask,taskGroup,orderedTasks,semesterForDate,readDraft:key=>drafts.get(key),writeDraft:(key,value)=>drafts.set(key,structuredClone(value)),deleteDraft:key=>drafts.delete(key),clearDrafts:()=>drafts.clear(),draftsNeedWarning:()=>false,resetSemesterDraft(){},FormData:class{constructor(form){return Object.entries({...form.values,original:form.elements.original.value});}},bindAttendance(){},bindSemester(){},bindNotifications(){},applyTimetableLayout(){}});
+ const sandbox=vm.createContext({document:{querySelector:node,createElement:()=>node('created:'+nodes.size),querySelectorAll:s=>s==='dialog[open]'?[...nodes.values()].filter(n=>n.open):[],body:node('body')},window:{addEventListener(){},scrollTo(){}},navigator:{onLine:true},location:{hash:'#tasks'},fetch:()=>new Promise(()=>{}),setTimeout(){},clearTimeout(){},setInterval(){},AbortSignal,AbortController,crypto,Date,Intl,URL,plainText,courseLabel,pendingTask,taskGroup,orderedTasks,semesterForDate,readDraft:key=>drafts.get(key),writeDraft:(key,value)=>drafts.set(key,structuredClone(value)),deleteDraft:key=>drafts.delete(key),clearDrafts:()=>drafts.clear(),setDraftUser(){},draftsNeedWarning:()=>false,resetSemesterDraft(){},FormData:class{constructor(form){return Object.entries({...form.values,original:form.elements.original.value});}},bindAttendance(){},bindSemester(){},bindNotifications(){},applyTimetableLayout(){}});
  vm.runInContext(source,sandbox);
  // Rendering has separate view tests; leave real load, editor and submit behaviour under test here.
- vm.runInContext('var renderViews=render;render=()=>{};',sandbox);
+ vm.runInContext("var renderViews=render;render=()=>{};identity={id:'test-user'};",sandbox);
  return {node,run:code=>vm.runInContext(code,sandbox),setFetch:fn=>sandbox.fetch=fn};
 }
 function entry(a,type='task'){
@@ -53,7 +53,7 @@ test('offline first load, expired sign-in, and a server failure have distinct re
  assert.equal(await a.run('load()'),false);assert.equal(a.node('#login').hidden,true);assert.equal(a.node('#load-title').textContent,'You’re offline');
  a.setFetch(async()=>Response.json({error:'Sign in again'},{status:401}));await a.run('load()');
  assert.equal(a.node('#login').hidden,false);assert.equal(a.node('#load-status').hidden,true);
- a.run('navigator.onLine=true;');a.setFetch(async()=>Response.json(empty()));await a.run('load()');
+ a.run("navigator.onLine=true;identity={id:'test-user'};");a.setFetch(async()=>Response.json(empty()));await a.run('load()');
  assert.equal(a.node('#app').hidden,false);assert.equal(a.node('#login').hidden,true);
  a.setFetch(async()=>new Response('Unavailable',{status:502}));await a.run('load()');
  assert.equal(a.node('#app').hidden,false);assert.match(a.node('#load-message').textContent,/last loaded records/);
@@ -222,10 +222,10 @@ test('long announcements remain fully available and inspection never marks them 
 });
 
 
-test('first sign-in is neutral while an expired loaded session and rejected password explain the failure',async()=>{
+test('first sign-in is neutral while an expired loaded session explains the failure',async()=>{
  const a=app();a.setFetch(async()=>Response.json({error:'Sign in again'},{status:401}));
- await a.run('load()');assert.equal(a.node('#login-error').textContent,'');
- a.run(`state=${JSON.stringify(empty())};`);await a.run('load()');assert.equal(a.node('#login-error').textContent,'Sign in again');
+ a.run('identity=null');await a.run('load()');assert.equal(a.node('#login-error').textContent,'');
+ a.run(`identity={id:'test-user'};state=${JSON.stringify(empty())};`);await a.run('load()');assert.equal(a.node('#login-error').textContent,'Sign in again');
  await assert.rejects(a.run("api('login',{password:'wrong'})"));assert.equal(a.node('#login-error').textContent,'Sign in again');
 });
 
@@ -255,11 +255,10 @@ test('daily heading follows the selected weekday and date instead of always sayi
 });
 
 
-test('SPeCTRUM-only login hides the passphrase and preserves that choice after a failed callback',async()=>{
- const a=app();a.setFetch(async()=>Response.json({error:'Sign in',loginMethod:'spectrum'},{status:401}));
- await a.run('load()');assert.equal(a.node('#login-form').hidden,true);assert.equal(a.node('#spectrum-signin').hidden,false);
- a.setFetch(async()=>Response.json({error:'Sign-in expired'},{status:401}));
- await a.run("window.completeSpectrumLogin('invalid')");assert.equal(a.node('#login-form').hidden,true);assert.equal(a.node('#spectrum-login').disabled,false);
- assert.match(a.node('#login-error').textContent,/Sign-in expired/);
- await a.node('#spectrum-login').onclick();assert.match(a.node('#login-error').textContent,/iPhone companion/);
+test('account changes clear private forms and reject stale responses',async()=>{
+ const a=app();a.run(`state=${JSON.stringify(empty())};writeDraft('editor:task:new',{title:'Private draft'});`);
+ let finish;a.setFetch(()=>new Promise(resolve=>finish=resolve));
+ const pending=a.run("api('state')");a.run('resetIdentity()');
+ finish(Response.json({tasks:[{title:'Old private task'}]}));await assert.rejects(pending,/account changed/);
+ assert.equal(a.run('state'),null);assert.equal(a.run("readDraft('editor:task:new')"),undefined);assert.equal(a.node('#view').innerHTML,'');assert.equal(a.node('#app').hidden,true);
 });

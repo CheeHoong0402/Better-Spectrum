@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+const origin=process.env.SMOKE_ORIGIN;
+if(!origin||!['localhost','127.0.0.1'].includes(new URL(origin).hostname))throw new Error('Use the disposable HTTP harness.');
+const request=(path,data,cookie='',extra={})=>fetch(origin+'/api/'+path,{method:data===undefined?'GET':'POST',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json',...extra},body:data===undefined?undefined:JSON.stringify(data)});
+for(const path of ['login','spectrum-login-start','spectrum-login-finish'])assert.equal((await request(path,{password:'old-password'})).status,401);
+assert.equal((await request('state',undefined,'sm_session=9999999999999.old')).status,401);
+const response=await request('auth/start',{email:'not-invited@example.com'});assert.equal(response.status,200);assert.match(response.headers.get('set-cookie'),/__Host-sm_login=/);
+assert.equal((await request('auth/verify',{code:'12345678'})).status,401);
+assert.equal((await request('auth/start',{email:'not-invited@example.com'},'',{Origin:'https://evil.example'})).status,403);
+assert.equal((await request('state',undefined,process.env.SMOKE_OTHER_COOKIE,{'X-Planner-User':'smoke-b'})).status,200);
+console.log('HTTP authentication boundaries passed; email delivery is tested separately against the real Auth service.');

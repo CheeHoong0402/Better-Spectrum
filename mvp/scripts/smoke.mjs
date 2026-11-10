@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import {setTimeout} from 'node:timers/promises';
 const origin=process.env.SMOKE_ORIGIN||'http://127.0.0.1:8787';let cookie='';
 if(!['localhost','127.0.0.1'].includes(new URL(origin).hostname))throw new Error('Smoke tests create records and must run against a disposable local server.');
-async function req(path,data){return fetch(origin+path,{method:data===undefined?'GET':'POST',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});}
+async function req(path,data){return fetch(origin+path,{method:data===undefined?'GET':'POST',headers:{Origin:origin,Cookie:cookie,'X-Planner-User':process.env.SMOKE_USER,'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});}
 assert.equal((await req('/')).status,200);
 assert.equal((await req('/api/state')).status,401);
-const login=await req('/api/login',{password:process.env.SMOKE_PASSWORD||'local-preview-only'});assert.equal(login.status,200);cookie=login.headers.get('set-cookie').split(';')[0];
+cookie=process.env.SMOKE_COOKIE;if(!cookie)throw new Error('Run through npm run test:http with disposable seeded sessions.');
 const s=await(await req('/api/state')).json();assert.equal(s.courses.length,0);assert.equal(s.classes.length,0);assert.ok(!('token'in s));
 assert.equal((await req('/api/tasks',{course:'COURSE-1',title:'Smoke test deadline',due:'2030-01-01T00:00:00+08:00',reminder_minutes:120})).status,200);
 let tasks=(await(await req('/api/state')).json()).tasks;const task=tasks.find(t=>t.title==='Smoke test deadline');assert.ok(task);
@@ -30,3 +31,12 @@ assert.equal((await req('/api/semester-apply',{definition:second.definition,toke
 assert.equal((await(await req('/api/state')).json()).classes.length,2);
 assert.equal((await req('/release.json')).status,200);assert.equal((await req('/semester.js')).status,200);
 console.log('HTTP smoke checks passed: login, privacy, task persistence/completion, input validation, and cross-origin protection.');
+
+const other=await fetch(origin+'/api/state',{headers:{Cookie:process.env.SMOKE_OTHER_COOKIE,'X-Planner-User':'smoke-b'}});assert.equal(other.status,200);assert.equal((await other.json()).classes.length,0);
+assert.ok((await fetch(origin+'/__scheduled')).ok);let queued;
+for(let attempt=0;attempt<20;attempt++){queued=await(await req('/api/state')).json();if(queued.lastTick)break;await setTimeout(250);}
+assert.ok(queued.lastTick,'local cron dispatched to the real local queue consumer');
+const untouched=await(await fetch(origin+'/api/state',{headers:{Cookie:process.env.SMOKE_OTHER_COOKIE,'X-Planner-User':'smoke-b'}})).json();assert.equal(untouched.lastTick??null,null);
+assert.equal((await fetch(origin+'/api/state',{headers:{Cookie:cookie,'X-Planner-User':'smoke-b'}})).status,409);
+assert.equal((await req('/api/logout',{})).status,200);assert.equal((await req('/api/state')).status,401);
+console.log('HTTP ownership checks passed: separate users, stale account header and revoked session.');

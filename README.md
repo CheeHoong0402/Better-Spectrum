@@ -1,6 +1,6 @@
 # Better Spectrum
 
-A private, single-student planner for iPhone and desktop. The app lives in `mvp/`: HTML/CSS/JavaScript, a Cloudflare Worker, and D1. No App Store or native build is required.
+A private planner for invited students on iPhone and desktop. One shared deployment serves separate accounts. The app lives in `mvp/`: HTML/CSS/JavaScript, a Cloudflare Worker, D1 and Cloudflare Queues, with Supabase Auth for email-code login. No App Store or native build is required. The multi-user working tree requires the [maintenance migration](mvp/MULTI_USER_MIGRATION.md) before production cutover.
 
 ## Develop
 
@@ -14,7 +14,7 @@ npm run db:local
 npm run dev
 ```
 
-Use `local-preview-only` on localhost. Local development uses `wrangler.jsonc` and a local database, with no personal seed records. Plan a semester or connect your own supported Moodle token to add courses.
+Configure Supabase Auth and an invited identity for email-code login. Local development uses `wrangler.jsonc` and a local database, with no personal seed records. Plan a semester or connect your own supported Moodle token to add courses. `npm run test:http` uses disposable seeded sessions and never grants a bypass login to the application.
 
 ```text
 npm run check
@@ -41,7 +41,7 @@ Dates must be reviewed against MAYA or TimeEdit. The app does not infer the seme
 
 ## Current boundaries
 
-- One private student account, not a shared multi-user service.
+- Invited accounts have separate records, SPeCTRUM connections, group scope and devices. Public registration and shared planners are not supported.
 - SPeCTRUM collection requires a supported token and remains bounded by the limits in `src/moodle.js`.
 - iPhone notifications require installation from Safari and a real-device delivery test. Provider acceptance does not prove phone display.
 - Only public app assets are cached offline. Private offline data is not implemented yet.

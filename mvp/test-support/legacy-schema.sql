@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, course TEXT NOT NULL, title TEXT NOT NULL, due TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', source TEXT NOT NULL DEFAULT 'manual', url TEXT, reminder_minutes INTEGER NOT NULL DEFAULT 120);
+CREATE TABLE IF NOT EXISTS classes (id TEXT PRIMARY KEY, course TEXT NOT NULL, kind TEXT NOT NULL, starts TEXT NOT NULL, ends TEXT NOT NULL, room TEXT, occ TEXT, source TEXT NOT NULL DEFAULT 'manual', reminder_minutes INTEGER NOT NULL DEFAULT 15);
+CREATE TABLE IF NOT EXISTS updates (id TEXT PRIMARY KEY, course TEXT, title TEXT NOT NULL, body TEXT, url TEXT, kind TEXT, changed TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscriptions (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, payload TEXT NOT NULL, due TEXT NOT NULL, sent TEXT, attempts INTEGER NOT NULL DEFAULT 0, error TEXT);
+CREATE TABLE IF NOT EXISTS semesters (id TEXT PRIMARY KEY, definition TEXT NOT NULL, revision INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS class_occurrences (class_id TEXT PRIMARY KEY, semester_id TEXT NOT NULL, series_id TEXT NOT NULL, date TEXT NOT NULL, overridden INTEGER NOT NULL DEFAULT 0, cancelled INTEGER NOT NULL DEFAULT 0, UNIQUE(semester_id,series_id,date));
+CREATE INDEX IF NOT EXISTS occurrences_semester ON class_occurrences(semester_id);
+CREATE TABLE IF NOT EXISTS content_scopes (id TEXT PRIMARY KEY, course TEXT NOT NULL, allowed INTEGER NOT NULL, parent_id TEXT);
+CREATE INDEX IF NOT EXISTS scopes_course ON content_scopes(course);
+CREATE TABLE IF NOT EXISTS update_scopes (update_id TEXT PRIMARY KEY, scope_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS attendance_sessions (id TEXT PRIMARY KEY, course TEXT NOT NULL, course_id INTEGER NOT NULL, cmid INTEGER NOT NULL, name TEXT NOT NULL, row_key TEXT NOT NULL, day TEXT NOT NULL, label TEXT NOT NULL, session_id INTEGER, recorded TEXT NOT NULL DEFAULT '', manual INTEGER NOT NULL DEFAULT 0, checked TEXT NOT NULL, confirmed_class TEXT, class_starts TEXT, class_ends TEXT, attempted TEXT, notified INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '');

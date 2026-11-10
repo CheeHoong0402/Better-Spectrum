@@ -1,11 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {session,sign,seal,unseal,validDate,validPush} from '../src/security.js';
+import {session,seal,unseal,validDate,validPush} from '../src/security.js';
 import {reminderDue} from '../src/worker.js';
-test('session rejects tampering, expiry, and another secret',async()=>{
- const exp=String(Date.now()+10000),secret='test-secret';const token=exp+'.'+await sign(exp,secret);const req=v=>new Request('https://planner.example',{headers:{Cookie:`sm_session=${v}`}});
- assert.equal(await session(req(token),secret),true);assert.equal(await session(req(token+'x'),secret),false);assert.equal(await session(req(token),'wrong'),false);
- const old='1';assert.equal(await session(req(old+'.'+await sign(old,secret)),secret),false);
+import {database,testCookie} from '../test-support/db.js';
+test('session rejects tampering, expiry, and removed identities',async()=>{
+ const {raw:DB,sqlite}=database();try{
+  const token=await testCookie(DB),req=v=>new Request('https://planner.example',{headers:{Cookie:v}});
+  assert.equal((await session(req(token),DB)).id,'test-user');assert.equal(await session(req(token+'x'),DB),null);
+  sqlite.exec('UPDATE sessions SET expires=0');assert.equal(await session(req(token),DB),null);
+ }finally{sqlite.close();}
 });
 test('stored Moodle credentials are encrypted and reject modified ciphertext',async()=>{
  const sealed=await seal('sample-secret-token','secret');assert.ok(!sealed.includes('sample-secret-token'));assert.equal(await unseal(sealed,'secret'),'sample-secret-token');await assert.rejects(()=>unseal(sealed,'other'));

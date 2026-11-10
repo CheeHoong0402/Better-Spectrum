@@ -2,8 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {groupNumbers,courseScope,allowedScope} from '../src/course-scope.js';
-import {database} from '../test-support/db.js';
-import {tick} from '../src/worker.js';
+import {database,testEnvironment} from '../test-support/db.js';
+import {deliver,reminders as tick} from '../src/worker.js';
 
 test('OCC and tutorial labels support lists, ranges and exact group numbers without treating exercise numbers as groups',()=>{
  for(const [label,numbers] of [['OCC 2 &amp;13',[2,13]],['[NRJ] T6, T10, T13 Section',[6,10,13]],['OCC/Group 29',[29]],['OCC 10-12',[10,11,12]],['OCC3, OCC4, OCC5',[3,4,5]],['OCC 7- Tutorial',[7]],['Tutorial 2/week 2',[]],['Week 11',[]],['T-1002-01',[]]])assert.deepEqual(groupNumbers(label,true),numbers);
@@ -34,24 +34,24 @@ test('reviewed Flexible Sections parents exclude other lecturers without inferri
 
 test('queued posts lose permission when their forum is excluded and old unscoped pushes are discarded',async t=>{
  const {DB,sqlite}=database();t.after(()=>sqlite.close());
- sqlite.prepare('INSERT INTO content_scopes VALUES (?,?,?,?)').run('module:1','TEST',0,null);
- sqlite.prepare('INSERT INTO content_scopes VALUES (?,?,?,?)').run('post:1','TEST',1,'module:1');
+ sqlite.prepare('INSERT INTO content_scopes (id,course,allowed,parent_id) VALUES (?,?,?,?)').run('module:1','TEST',0,null);
+ sqlite.prepare('INSERT INTO content_scopes (id,course,allowed,parent_id) VALUES (?,?,?,?)').run('post:1','TEST',1,'module:1');
  assert.equal(await allowedScope(DB,'post:1'),false);
- sqlite.prepare('INSERT INTO subscriptions VALUES (?,?)').run('device','{}');
+ sqlite.prepare('INSERT OR REPLACE INTO subscriptions (id,value) VALUES (?,?)').run('device','{}');
  for(const [id,payload] of [['post:1-hash:device',{scope:'post:1'}],['deadline:assign-1:old:device',{}]])sqlite.prepare('INSERT INTO deliveries (id,subscription_id,payload,due) VALUES (?,?,?,?)').run(id,'device',JSON.stringify(payload),'2026-01-01T00:00:00Z');
  const now=Date.now(),oddMinute=now+(Math.floor(now/60000)%2===0?60000:0);
- await tick({DB,VAPID_PUBLIC_KEY:'present',VAPID_PRIVATE_KEY:'present'},oddMinute);
+ await deliver({...testEnvironment(DB),VAPID_PUBLIC_KEY:'present',VAPID_PRIVATE_KEY:'present'});
  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get().n,0);
 });
 
 test('scheduler queues only relevant imported assignments and keeps manual deadlines working',async t=>{
  const {DB,sqlite}=database();t.after(()=>sqlite.close());
- sqlite.prepare('INSERT INTO subscriptions VALUES (?,?)').run('device','{}');
- sqlite.prepare('INSERT INTO content_scopes VALUES (?,?,?,?)').run('module:1','TEST',1,null);
- sqlite.prepare('INSERT INTO content_scopes VALUES (?,?,?,?)').run('module:2','TEST',0,null);
+ sqlite.prepare('INSERT OR REPLACE INTO subscriptions (id,value) VALUES (?,?)').run('device','{}');
+ sqlite.prepare('INSERT INTO content_scopes (id,course,allowed,parent_id) VALUES (?,?,?,?)').run('module:1','TEST',1,null);
+ sqlite.prepare('INSERT INTO content_scopes (id,course,allowed,parent_id) VALUES (?,?,?,?)').run('module:2','TEST',0,null);
  const now=Date.now(),oddMinute=now+(Math.floor(now/60000)%2===0?60000:0),due=new Date(oddMinute+3600000).toISOString();
  for(const [id,source] of [['assign-1','SPeCTRUM'],['assign-2','SPeCTRUM'],['manual','manual']])sqlite.prepare('INSERT INTO tasks (id,course,title,due,source,reminder_minutes) VALUES (?,?,?,?,?,?)').run(id,'TEST','Deadline',due,source,120);
- await tick({DB},oddMinute);
+ await tick(testEnvironment(DB),oddMinute);
  const ids=sqlite.prepare('SELECT id FROM deliveries ORDER BY id').all().map(r=>r.id);
  assert.equal(ids.length,2);assert.ok(ids.some(id=>id.startsWith('task:assign-1:')));assert.ok(ids.some(id=>id.startsWith('task:manual:')));
 });
