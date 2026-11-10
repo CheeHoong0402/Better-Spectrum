@@ -176,6 +176,16 @@ test('disconnect requires confirmation and cancellation sends no request',async(
  assert.equal(calls.filter(url=>url==='/api/disconnect').length,1);
 });
 
+test('sign out requires confirmation before ending the session',async()=>{
+ const a=app(),calls=[];
+ a.run(`state=${JSON.stringify(empty())};globalThis.confirm=()=>false;bind();`);
+ a.setFetch(async url=>{calls.push(url);return Response.json({ok:true});});
+ await a.node('#logout').events.click();
+ assert.deepEqual(calls,[]);assert.equal(a.run('identity.id'),'test-user');
+ a.run('globalThis.confirm=()=>true');await a.node('#logout').events.click();
+ assert.deepEqual(calls,['/api/logout']);assert.equal(a.run('identity'),null);
+});
+
 test('empty states distinguish filters, completion, disconnected setup and first or failed course checks',()=>{
  const a=app();a.run(`state=${JSON.stringify(empty())};`);
  assert.match(a.run('tasks()'),/Connect SPeCTRUM/);assert.match(a.run('updates()'),/Connect to collect/);
