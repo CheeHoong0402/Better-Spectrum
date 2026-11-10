@@ -205,7 +205,7 @@ async function action(fn,control,label,retry=false){
  busy=true;fallback.hidden=true;const wasDisabled=button?.disabled,original=button?.textContent;
  if(button){button.disabled=true;button.setAttribute('aria-busy','true');if(button.tagName==='BUTTON')button.textContent=label;}
  report(label);document.body.setAttribute('aria-busy','true');
- try{const result=await fn();if(result===false){report('Could not finish. Follow the recovery message above and try again.');return false;}if(feedback.isConnected){feedback.hidden=false;feedback.textContent='Done.';}return true;}
+ try{const result=await fn();if(result===false){report('Could not finish. Follow the recovery message above and try again.');return false;}feedback.hidden=true;feedback.textContent='';fallback.hidden=true;fallback.textContent='';return true;}
  catch(e){
   if(e.status===401){feedback.hidden=true;fallback.hidden=true;return false;}
   const target=report(e.message+' Your action could not be confirmed.');

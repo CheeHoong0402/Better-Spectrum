@@ -143,7 +143,7 @@ test('actions show progress, reject repeated work visibly, and retain errors wit
 test('switch progress stays outside its label and the control unlocks after saving',async()=>{
  const a=app(),control={id:'notifications-enabled',type:'checkbox',tagName:'INPUT',checked:true,textContent:'',isConnected:true,disabled:false,closest(){return null;},setAttribute(){},removeAttribute(){},get parentElement(){throw Error('Switch labels must not contain progress text.');}};
  await a.run('action')(async()=>{assert.equal(control.disabled,true);assert.equal(control.checked,true);},control,'Updating notifications…');
- assert.equal(control.disabled,false);assert.equal(control.checked,true);assert.equal(a.node('#action-status').textContent,'Done.');
+ assert.equal(control.disabled,false);assert.equal(control.checked,true);assert.equal(a.node('#action-status').textContent,'');assert.equal(a.node('#action-status').hidden,true);
 });
 
 test('semester context uses dates rather than IDs and disconnected status preserves historical sync time',()=>{
