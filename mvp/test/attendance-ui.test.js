@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {attendanceConnection} from '../public/attendance.js';
+import {attendanceConnection,bindAttendance} from '../public/attendance.js';
 const helpers={esc:s=>String(s??'')};
 
 test('connected attendance setup stays collapsed with unique sign-in controls',()=>{
@@ -17,4 +17,14 @@ test('disconnected attendance opens QR setup under SPeCTRUM connection',()=>{
  assert.match(view,/Your QR image stays on this device/);
  assert.match(view,/Connect your SPeCTRUM courses first/);
  assert.doesNotMatch(view,/attendance-login|attendance-check|attendance-enabled/);
+});
+
+test('attendance disconnect can be cancelled and only sends a request after confirmation',async t=>{
+ const originalDocument=globalThis.document,originalConfirm=globalThis.confirm;
+ t.after(()=>{globalThis.document=originalDocument;globalThis.confirm=originalConfirm;});
+ let click;const calls=[];
+ globalThis.document={querySelector:selector=>selector==='#attendance-disconnect'?{addEventListener:(event,handler)=>{click=handler;}}:null};
+ bindAttendance({api:async path=>calls.push(path),load:async()=>{},action:fn=>fn(),toast:()=>{}});
+ globalThis.confirm=()=>false;await click();assert.deepEqual(calls,[]);
+ globalThis.confirm=()=>true;await click();assert.deepEqual(calls,['attendance-disconnect']);
 });

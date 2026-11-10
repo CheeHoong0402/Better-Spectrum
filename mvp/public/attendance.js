@@ -8,13 +8,12 @@ export function attendanceConnection(state,{esc}){
  <details class="attendance-connection" ${a.connected?'':'open'}><summary>${a.connected?'Manage connection':'Connect attendance'}</summary>
  ${!state.connected?'<p>Connect your SPeCTRUM courses first.</p>':''}
  <details class="connection-guide"><summary>How to connect attendance with a QR image</summary><ol><li>Connect your courses above first.</li><li>Open SPeCTRUM in your browser and sign in with the same university account as course sync.</li><li>Open your profile → More Details → Mobile app → View QR code.</li><li>Save the QR image or take a screenshot. On iPhone/iPad, use the app switcher to return to Better Spectrum.</li><li>Choose the image below, then tap Connect using QR code. Codes expire after 10 minutes; generate a fresh one if needed.</li></ol><p class="subtle">Use the mobile-app sign-in QR code from your profile. A QR code shown by your lecturer for a class is different. After setup, auto-marking stays off until you enable it in Settings.</p></details>
- <form id="attendance-qr"><label>QR image<input type="file" name="qr" accept="image/png,image/jpeg,image/webp" required></label><p class="subtle">Setup leaves auto-marking off. Your QR image stays on this device.</p><button class="primary">Connect using QR code</button><p id="attendance-qr-status" role="status"></p></form>
+ <form id="attendance-qr"><label>QR image<input type="file" name="qr" accept="image/png,image/jpeg,image/webp" required></label><p class="subtle">Setup leaves auto-marking off. Your QR image stays on this device.</p><div class="connection-actions"><button class="primary" type="submit">Connect using QR code</button>${a.connected?'<button class="danger disconnect-button" type="button" id="attendance-disconnect">Disconnect attendance</button>':''}</div><p id="attendance-qr-status" role="status"></p></form>
  <details class="attendance-alternatives"><summary>Alternative connection methods</summary><p class="subtle">If QR setup does not work, try one of these options. The sign-in helper requires a Windows computer.</p>
  ${a.connected||a.connection==='Direct sign-in available'?`<details><summary>Password sign-in</summary><form id="attendance-login"><label>Siswa email or username<input name="username" autocomplete="username" required maxlength="200"></label><label>SPeCTRUM password<input name="password" type="password" autocomplete="off" required maxlength="500"></label><p class="subtle">Use the same account as course sync. Your password is not saved.</p><button class="primary">Connect attendance</button></form></details>`:''}
  <details><summary>Windows sign-in helper</summary><p>Run the Windows helper, then paste the pairing code into it.</p><button id="attendance-pair">Generate pairing code</button><div id="attendance-pair-code" role="status"></div></details>
  <button id="attendance-support">Check sign-in method</button></details>
  <div class="actions"><a href="https://spectrum.um.edu.my/" target="_blank" rel="noopener noreferrer">Open SPeCTRUM ↗</a></div>
- ${a.connected?'<button class="quiet" id="attendance-disconnect">Disconnect attendance</button>':''}
  </details></section>`;
 }
 export function bindAttendance({api,load,action,toast}){
@@ -23,7 +22,7 @@ export function bindAttendance({api,load,action,toast}){
  document.querySelector('#attendance-support')?.addEventListener('click',()=>action(async()=>{const r=await api('attendance-support',{});await load();toast(r.supported?'Sign-in available.':r.message);}));
  document.querySelector('#attendance-enabled')?.addEventListener('change',e=>action(async()=>{const enabled=e.target.checked;e.target.disabled=true;try{await api('attendance-enabled',{enabled});toast(enabled?'Auto-marking on.':'Auto-marking off.');}finally{await load();}}));
  document.querySelector('#attendance-login')?.addEventListener('submit',e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));e.target.elements.password.value='';action(async()=>{try{await api('attendance-connect',data);toast('Attendance connected. You can now enable auto-marking.');}finally{await load();}});});
- document.querySelector('#attendance-disconnect')?.addEventListener('click',()=>action(async()=>{await api('attendance-disconnect',{});await load();}));
+ document.querySelector('#attendance-disconnect')?.addEventListener('click',()=>{if(!confirm('Disconnect attendance? Auto-marking will stop. Your course connection and saved records will stay.'))return;return action(async()=>{await api('attendance-disconnect',{});await load();toast('Attendance disconnected.');});});
 }
 
 
