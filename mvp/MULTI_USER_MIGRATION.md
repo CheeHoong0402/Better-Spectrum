@@ -1,6 +1,6 @@
 # Multi-user migration and release
 
-The working tree now supports invited users in one Worker deployment and one D1 database. Production remains on the previous single-user release until the steps below are completed. Do not apply migration 0004 through an ordinary unattended release.
+Production now supports invited users in one Worker deployment and one D1 database. The ownership migration completed on 10 November 2026, and the owner confirmed live email login and original records. The deployed code release is `ad4d21e8c974c95797b3ec748564c159b5f84a57`. The instructions below remain the recovery/rehearsal runbook; do not reapply migration 0004 through an ordinary unattended release.
 
 ## Auth setup
 
@@ -16,7 +16,9 @@ Before cutover:
 4. Provide the project's server-side secret key locally using `SUPABASE_SECRET_KEY`, or the ignored `.private/auth.json` `secretKey` field. Do not put it in Git, the frontend, URLs or chat. It is used only by the provisioning script, never uploaded to the planner Worker.
 5. Run `node scripts/provision-user.mjs OWNER_EMAIL --owner`, using the owner email saved in `.private/auth.json`. This pre-admits an email identity without a password or invitation email and saves its immutable subject in `.private/invite-legacy-owner.json`. Admin confirmation allows OTP login with public sign-ups disabled; the owner's successful code verification still proves control of the mailbox before the app grants a session.
 
-The project, public configuration, disabled public sign-ups, ten-minute OTP expiry, Gmail SMTP settings and code email template are saved. Gmail uses `smtp.gmail.com:587` with the full sender email as its username; the app password was entered by the operator in the dashboard. The server key was verified locally, the owner identity is provisioned, and the operator confirmed receipt of the eight-digit code email. Cloudflare is authenticated and both production queues exist with 24-hour retention. A verified live backup passed the isolated migration rehearsal, including record counts, university identity, credential conversion, foreign keys and restore. Full app login and production cutover remain pending.
+The project, public configuration, disabled public sign-ups, ten-minute OTP expiry, Gmail SMTP settings and code email template are saved. Gmail uses `smtp.gmail.com:587` with the full sender email as its username; the app password was entered by the operator in the dashboard. The server key was verified locally, the owner identity is provisioned, and the operator confirmed receipt of the eight-digit code email. Cloudflare is authenticated and both production queues exist with 24-hour retention. A verified live backup passed the isolated migration rehearsal. The live migration preserved every original field and record count, activated the owner, and passed foreign-key checks. Maintenance is off; the owner confirmed live app login and records, and real course jobs completed and rescheduled without retries. Attendance automation starts disabled and devices must enable notifications again.
+
+The source is backed up on `codex/multi-user-migration`. Until this branch is integrated, do not deploy the older default branch: its ownerless code is incompatible with the migrated database. Use only the reviewed multi-user source and schema-compatible rollback versions.
 
 ## Local verification
 
