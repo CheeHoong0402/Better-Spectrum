@@ -278,10 +278,19 @@ test('imported deadline detail and confirmation explain planner-only deletion an
 });
 
 
+test('Today date navigation displays the selected semester week',()=>{
+ const a=app();a.run(`state=${JSON.stringify({...empty(),semesters:[{start:'2026-10-01',end:'2026-12-31',week1:'2026-10-05'}]})};agendaDay='2026-11-09';`);
+ assert.match(a.run('today()'),/title="Return to today">Week 6<\/button>/);
+ a.run("agendaDay='2026-11-15'");assert.match(a.run('today()'),/>Week 6<\/button>/);
+ a.run("agendaDay='2026-11-16'");assert.match(a.run('today()'),/>Week 7<\/button>/);
+ a.run("agendaDay='2026-10-02'");assert.match(a.run('today()'),/>Before Week 1<\/button>/);
+ a.run("agendaDay='2027-01-01'");assert.match(a.run('today()'),/>No semester<\/button>/);
+});
+
 test('daily heading follows the selected weekday and date instead of always saying Today',()=>{
  const a=app();a.run(`state=${JSON.stringify(empty())};agendaDay='2026-11-09';`);
  let html=a.run('today()');assert.match(html,/<h1 tabindex="-1">Monday<\/h1>/);assert.match(html,/9 November 2026/);assert.doesNotMatch(html,/<h1[^>]*>Today/);
- a.run("agendaDay='2026-11-10'");html=a.run('today()');assert.match(html,/<h1 tabindex="-1">Tuesday<\/h1>/);assert.match(html,/10 November 2026/);assert.match(html,/id="agenda-today">Today/,'keep the explicit return-to-today control');
+ a.run("agendaDay='2026-11-10'");html=a.run('today()');assert.match(html,/<h1 tabindex="-1">Tuesday<\/h1>/);assert.match(html,/10 November 2026/);assert.match(html,/id="agenda-today" aria-label="Return to today"/,'keep the explicit return-to-today control');
 });
 
 
