@@ -106,10 +106,11 @@ function courseSelect(){return `<label><span>Filter by course</span><select id="
 function tasks(){const rows=state.tasks.filter(t=>(filter==='all'||t.course===filter)&&(taskFilter==='all'||(taskFilter==='active'?active(t):!active(t))));return heading('Deadlines',`<button class="primary" data-add="task">+ Add deadline</button>`)+`<div class="filter-row">${courseSelect()}<label>Show<select id="task-filter"><option value="active" ${taskFilter==='active'?'selected':''}>Pending</option><option value="completed" ${taskFilter==='completed'?'selected':''}>Completed / submitted</option><option value="all" ${taskFilter==='all'?'selected':''}>All deadlines</option></select></label></div>${taskSections(rows)||`<section class="panel">${deadlineEmpty()}</section>`}<p class="subtle">SPeCTRUM submissions are confirmed by the university system. Manual tasks can be marked done here.</p>`+removedView('task');}
 function updates(){
  const rows=state.updates.filter(u=>filter==='all'||u.course===filter);
- const categories=[['material','Materials'],['announcement','Announcements'],['deadline','Deadlines']];
+ const categories=[['material','Materials'],['announcement','Announcements'],['deadline','Deadlines'],['attendance','Attendance']];
+ const routeCategory=location.hash.split('/')[1];if(categories.some(([kind])=>kind===routeCategory))updateFilter=routeCategory;
  const options=categories.map(([kind,title])=>`<option value="${kind}" ${updateFilter===kind?'selected':''}>${title}</option>`).join('');
  const groups=categories.filter(([kind])=>kind===updateFilter).map(([kind,title])=>{
-  const items=rows.filter(u=>(['announcement','deadline'].includes(u.kind)?u.kind:'material')===kind).sort((a,b)=>(Date.parse(b.changed)||0)-(Date.parse(a.changed)||0)||String(a.id).localeCompare(String(b.id)));
+  const items=rows.filter(u=>(['announcement','deadline','attendance'].includes(u.kind)?u.kind:'material')===kind).sort((a,b)=>(Date.parse(b.changed)||0)-(Date.parse(a.changed)||0)||String(a.id).localeCompare(String(b.id)));
   let previous='';
   return items.length?`<section class="panel update-group"><div class="panel-heading"><h2>${title}</h2><span class="subtle">${items.length} ${items.length===1?'result':'results'} · ${items.filter(u=>!u.seen).length} unread</span></div>${items.map(u=>{
    const valid=Number.isFinite(Date.parse(u.changed)),stamp=valid?dateKey(u.changed):'unknown',newDay=stamp!==previous;previous=stamp;
@@ -117,7 +118,7 @@ function updates(){
    return `${newDay?`<h3 class="update-day">${valid?esc(day(u.changed)):'Date unverified'}</h3>`:''}<article class="update"><div class="task-meta"><span><span class="course-dot" data-color="${esc(u.course)}"></span>${esc(u.course)}</span>${!u.seen?'<span class="unread-label">Unread</span>':''}</div><h3>${esc(plainText(u.title))}</h3>${body?`<div class="update-body"><p class="excerpt">${esc(excerpt)}${excerpt.length<body.length?'…':''}</p>${excerpt.length<body.length?`<details><summary><span class="show-more">Show more</span><span class="show-less">Show less</span></summary><p>${esc(body)}</p></details>`:''}</div>`:''}<div class="update-actions">${external(u.url,'Open in SPeCTRUM')}${!u.seen?`<button class="quiet" data-seen="${esc(u.id)}">Mark read</button>`:''}</div></article>`;
   }).join('')}</section>`:'';
  }).join('');
- const empty=rows.length?`<div class="empty"><h2>No ${categories.find(([kind])=>kind===updateFilter)[1].toLowerCase()}${filter==='all'?' yet':' for this course'}</h2></div>`:updatesEmpty();
+ const empty=rows.length||updateFilter==='attendance'?`<div class="empty"><h2>No ${categories.find(([kind])=>kind===updateFilter)[1].toLowerCase()}${filter==='all'?' yet':' for this course'}</h2></div>`:updatesEmpty();
  return heading('Course updates')+`<div class="filter-row">${courseSelect()}<label><span>Filter by type</span><select id="update-filter">${options}</select></label></div>`+(groups||`<section class="panel">${empty}</section>`);
 }
 function deadlineEmpty(){
@@ -168,7 +169,7 @@ function bind(){
  applyTimetableLayout();
  bindNotifications(state,{api,load,action,toast});
  $('#clear-filters')?.addEventListener('click',()=>{filter='all';taskFilter='all';render();});
- $('#update-filter')?.addEventListener('change',e=>{updateFilter=e.target.value;render();$('#update-filter')?.focus();});
+ $('#update-filter')?.addEventListener('change',e=>{updateFilter=e.target.value;location.hash='#updates/'+updateFilter;render();$('#update-filter')?.focus();});
  $('#show-completed')?.addEventListener('click',()=>{taskFilter='completed';render();});
  $('#show-pending')?.addEventListener('click',()=>{taskFilter='active';render();});
  bindAttendance({api,load,action,toast});

@@ -199,6 +199,14 @@ test('empty states distinguish filters, completion, disconnected setup and first
  a.run("filter='all';taskFilter='completed';state.tasks=[{course:'A',status:'pending'}];");assert.match(a.run('tasks()'),/No completed deadlines/);
 });
 
+test('Attendance updates have a separate category, course filter and notification link',()=>{
+ const a=app();
+ a.run(`state=${JSON.stringify({...empty(),updates:[{id:'a',course:'A',kind:'attendance',title:'Attendance confirmed',body:'Present',seen:0,changed:'2030-01-01'},{id:'m',course:'A',kind:'material',title:'Lecture notes',seen:0,changed:'2030-01-01'}]})};location.hash='#updates/attendance';`);
+ const view=a.run('updates()');assert.match(view,/<option value="attendance" selected>Attendance<\/option>/);assert.match(view,/Attendance confirmed|Present/);assert.doesNotMatch(view,/Lecture notes/);
+ a.run("filter='B'");assert.doesNotMatch(a.run('updates()'),/Attendance confirmed/);
+ a.run("filter='all';state.updates=[]");assert.match(a.run('updates()'),/No attendance yet/);
+});
+
 test('Updates displays one category at a time and combines category and course filters',()=>{
  const a=app(),updates=[
   {id:'deadline',course:'A',kind:'deadline',title:'Assignment due',body:'Due tomorrow',seen:0},

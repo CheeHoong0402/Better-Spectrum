@@ -82,6 +82,20 @@ test('enabled auto-marking matches a current GUL1001 class and submits an inline
  assert.equal(f.state.posts,1);
  assert.equal(f.sqlite.prepare('SELECT recorded,notified FROM attendance_sessions').get().recorded,'Present');
  assert.equal(f.state.notifications.filter(n=>n.id.startsWith('attendance-result:')).length,1);
+ const updates=f.sqlite.prepare("SELECT * FROM updates WHERE kind='attendance'").all();
+ assert.equal(updates.length,1);assert.equal(updates[0].user_id,'test-user');assert.equal(updates[0].course,'GUL1001');assert.match(updates[0].body,/Present/);assert.equal(updates[0].seen,0);
+ assert.equal(f.state.notifications.find(n=>n.id.startsWith('attendance-result:')).url,'/#updates/attendance');
+});
+
+test('notification retries retain one attendance update and its read state',async t=>{
+ const f=await fixture(t);let notifications=0;
+ const notify=async()=>{if(++notifications===1)throw Error('Temporary queue failure');};
+ await attendanceTick(f.env,notify,f.now);
+ assert.equal(f.sqlite.prepare("SELECT count(*) n FROM updates WHERE kind='attendance'").get().n,1);
+ f.sqlite.exec("UPDATE updates SET seen=1 WHERE kind='attendance'");
+ await attendanceTick(f.env,notify,f.now);await attendanceTick(f.env,notify,f.now);
+ assert.equal(f.state.posts,1);assert.equal(notifications,2);
+ const rows=f.sqlite.prepare("SELECT seen FROM updates WHERE kind='attendance'").all();assert.equal(rows.length,1);assert.equal(rows[0].seen,1);
 });
 
 test('the scheduler discovers and marks a matching session in the same check without manual setup',async t=>{
@@ -136,6 +150,7 @@ test('password and QR sessions stay manual, no password or status is posted',asy
 });
 test('uncertain write is never repeated and sensitive errors are not exposed',async t=>{
  const f=await fixture(t);f.state.timeout=true;await confirmAttendance(f.env,{id:f.id,classId:'class'});await attendanceTick(f.env,f.notify,f.now);await attendanceTick(f.env,f.notify,f.now);assert.equal(f.state.gets,1);assert.equal(f.state.posts,0);assert.doesNotMatch(JSON.stringify(f.state.notifications),/sensitive/);await assert.rejects(()=>confirmAttendance(f.env,{id:f.id,classId:'class'}),/Choose/);
+ assert.equal(f.sqlite.prepare("SELECT count(*) n FROM updates WHERE kind='attendance'").get().n,0);
 });
 test('expired login fails closed and redirects never forward cookies off SPeCTRUM',async t=>{
  const f=await fixture(t);f.state.expired=true;await confirmAttendance(f.env,{id:f.id,classId:'class'});await attendanceTick(f.env,f.notify,f.now);assert.equal(f.state.gets,0);assert.match(f.state.notifications[0].body,/expired/);

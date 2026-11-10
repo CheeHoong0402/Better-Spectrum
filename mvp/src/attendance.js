@@ -221,8 +221,12 @@ export async function refreshAttendance(env,courseid,notify){
  await setting(env.DB,'attendance_checked',new Date().toISOString());await setting(env.DB,'attendance_error','');
 }
 async function recordedAttendance(env,notify,row,status){
- await env.DB.prepare(`${ownerSQL} UPDATE attendance_sessions SET recorded=?2,message=?3 WHERE user_id=(SELECT id FROM owner) AND (id=?4) `).bind(status,'Verified in SPeCTRUM',row.id).run();
- await notify(`attendance-result:${row.id}`,{title:`${row.course} · attendance confirmed`,body:`${row.label} · ${status}. Verified in SPeCTRUM.`,url:'/#settings'});
+ const id=`attendance-result:${row.id}`;
+ await env.DB.batch([
+  env.DB.prepare(`${ownerSQL} UPDATE attendance_sessions SET recorded=?2,message=?3 WHERE user_id=(SELECT id FROM owner) AND id=?4`).bind(status,'Verified in SPeCTRUM',row.id),
+  env.DB.prepare(`${ownerSQL} INSERT OR IGNORE INTO updates (user_id,id,course,title,body,url,kind,changed) SELECT (SELECT id FROM owner),?2,course,?3,?4,?5,'attendance',?6 FROM attendance_sessions WHERE user_id=(SELECT id FROM owner) AND id=?7 AND attempted IS NOT NULL`).bind(id,`${row.course} · Attendance confirmed`,`${row.label} · ${status}. Confirmed in SPeCTRUM after automatic marking.`,`${origin}/mod/attendance/view.php?id=${row.cmid}&view=5`,new Date().toISOString(),row.id)
+ ]);
+ await notify(id,{title:`${row.course} · attendance confirmed`,body:`${row.label} · ${status}. Verified in SPeCTRUM.`,url:'/#updates/attendance'});
  await env.DB.prepare(`${ownerSQL} UPDATE attendance_sessions SET notified=1 WHERE user_id=(SELECT id FROM owner) AND (id=?2) `).bind(row.id).run();
 }
 export async function setAttendanceEnabled(env,enabled){
