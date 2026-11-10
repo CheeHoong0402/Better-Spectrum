@@ -126,16 +126,16 @@ test('stale deadline drafts require an explicit choice and keep typed fields whe
 
 test('actions show progress, reject repeated work visibly, and retain errors with safe retry',async()=>{
  const a=app();let reject,calls=0;
- const button={id:'sync',tagName:'BUTTON',textContent:'Check now',disabled:false,isConnected:false,setAttribute(){},removeAttribute(){},closest(){return null;}};
+ const button={id:'refresh',tagName:'BUTTON',textContent:'Refresh',disabled:false,isConnected:false,setAttribute(){},removeAttribute(){},closest(){return null;}};
  const work=()=>{calls++;return new Promise((resolve,no)=>reject=no);};
  // Pass real functions through the VM without replacing the action implementation.
  a.run('var work,control;');
  const first=a.run('action');
  const pending=first(work,button);
- assert.equal(button.disabled,true);assert.equal(button.textContent,'Checking courses…');
+ assert.equal(button.disabled,true);assert.equal(button.textContent,'Refreshing records…');
  await first(work,button);assert.equal(calls,1);assert.match(a.node('#action-status').textContent,/still running/);
  reject(new Error('Temporary failure'));await pending;
- assert.equal(button.disabled,false);assert.equal(button.textContent,'Check now');
+ assert.equal(button.disabled,false);assert.equal(button.textContent,'Refresh');
  assert.match(a.node('#action-status').textContent,/Temporary failure/);
  assert.equal(a.node('#action-status').children.at(-1).textContent,'Try again');
 });
@@ -162,6 +162,18 @@ test('in-app removal confirmation can cancel safely and offers Undo after a conf
  await button.onclick({currentTarget:button});
  assert.equal(calls[0].url,'/api/task-delete');assert.equal(calls[0].data.id,'example');assert.equal(a.node('#remove-record').open,false);
  assert.equal(a.node('#toast').children.at(-1).textContent,'Undo');
+});
+
+test('disconnect requires confirmation and cancellation sends no request',async()=>{
+ const a=app(),calls=[];
+ a.run(`state=${JSON.stringify(empty())};globalThis.confirm=()=>false;bind();`);
+ a.setFetch(async(url,options)=>{calls.push(url);return Response.json(options.body?{ok:true}:empty());});
+ await a.node('#disconnect').events.click();
+ assert.deepEqual(calls,[]);
+ a.run('globalThis.confirm=message=>{if(!message.includes("courses and attendance"))throw Error("Missing scope");return true;}');
+ await a.node('#disconnect').events.click();
+ assert.equal(calls[0],'/api/disconnect');
+ assert.equal(calls.filter(url=>url==='/api/disconnect').length,1);
 });
 
 test('empty states distinguish filters, completion, disconnected setup and first or failed course checks',()=>{
